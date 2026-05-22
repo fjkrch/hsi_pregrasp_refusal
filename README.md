@@ -33,6 +33,10 @@ Completed so far:
 - no-oracle matched-acceptance holdout analysis with bootstrap confidence intervals
 - matched-acceptance clutter analysis with bootstrap confidence intervals
 - language-conditioned wrong-object simulator pilot with automatic labels
+- driver-580 camera-rendering recovery after the Isaac Sim RTX crash on driver 595
+- scaled language-conditioned wrong-object camera dataset: `600` train events plus `400` holdout events
+- matched-acceptance wrong-object CI table, proxy-geometry table, and online wrong-object refusal/reapproach evaluation
+- small language wrong-object camera+SmolVLA subset with nonzero action-uncertainty features
 
 Latest state-only holdout result summary:
 
@@ -46,9 +50,9 @@ Latest state-only holdout result summary:
 | Full Learned Head | `0.0988` | `0.9012` | `0.8350` |
 | Action/State Learned Head | `0.2000` | `0.8000` | `0.0875` |
 
-Current conclusion: in the simplified IsaacLab setup, pre-grasp geometry is the dominant signal. The next experiments
-must add online re-approach, visual clutter, distractors, VLA uncertainty, or real robot data to go beyond a simple
-distance/lateral-error threshold.
+Current state-only conclusion: in the simplified single-object IsaacLab setup, pre-grasp geometry is the dominant
+signal. That is why the newer language-conditioned wrong-object experiment below is the stronger simulator benchmark:
+geometry is close to the wrong object, but the right decision is to refuse.
 
 Latest online simulator result:
 
@@ -85,10 +89,23 @@ Latest VLA asset/runtime status:
 | Mean action variance over 8 samples | `0.0065883` |
 | Action std norm over 8 samples | `0.1988218` |
 
+Latest camera/driver status:
+
+| Item | Result |
+| --- | --- |
+| Working NVIDIA driver | `580.159.03` |
+| Kernel | `6.17.0-29-generic` |
+| Isaac Sim graphics API | Vulkan |
+| Camera smoke | passed with nonzero table/wrist/overhead RGB summaries |
+| SmolVLA camera smoke | passed with `vla_action_var_mean=0.001698` and `vla_inference_ms=782.913` |
+| Broken driver note | driver `595.71.05` crashed inside the RTX renderer for camera jobs on this machine |
+
 Latest camera-enabled VLA-sim datasets:
 
 | Run | Events | Successes | Failures | Failure Rate | VLA Samples | Mean VLA ms/Event | Output |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Driver-580 camera smoke | `1` | `1` | `0` | `0.0000` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/camera_driver580_smoke1_events.csv` |
+| Driver-580 camera + SmolVLA smoke | `1` | `1` | `0` | `0.0000` | `2` | `782.9128` | `logs/hsi_pregrasp/vla/camera_driver580_vla_smoke1_events.csv` |
 | Visible VLA smoke | `10` | `10` | `0` | `0.0000` | `2` | `353.4094` | `logs/hsi_pregrasp/vla/stage0_vla_events.csv` |
 | Pilot partial | `95` | `67` | `28` | `0.2947` | `4` | `674.6589` | `logs/hsi_pregrasp/vla/pilot150_vla_events.csv` |
 | Proposal-scale main | `600` | `452` | `148` | `0.2467` | `2` | `331.2642` | `logs/hsi_pregrasp/vla/main600_vla_events.csv` |
@@ -96,6 +113,9 @@ Latest camera-enabled VLA-sim datasets:
 | Distractor smoke | `12` | `8` | `4` | `0.3333` | `1` | not summarized | `logs/hsi_pregrasp/vla/distractor12_vla_events.csv` |
 | Language wrong-object train pilot | `63` | `30` | `33` | `0.5238` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_main63_events.csv` |
 | Language wrong-object holdout pilot | `40` | `22` | `18` | `0.4500` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_smoke40_events.csv` |
+| Language wrong-object scaled train | `600` | `280` | `320` | `0.5333` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_main600_camera_events.csv` |
+| Language wrong-object scaled holdout | `400` | `195` | `205` | `0.5125` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv` |
+| Language wrong-object VLA subset | `40` | `22` | `18` | `0.4500` | `2` | `334.6038` | `logs/hsi_pregrasp/vla/language_wrong_object_vla40_events.csv` |
 | Partial-occlusion robustness | `100` | `82` | `18` | `0.1800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_partial_occlusion100_events.csv` |
 | Clutter robustness | `100` | `70` | `30` | `0.3000` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_clutter100_events.csv` |
 | Lighting robustness | `100` | `72` | `28` | `0.2800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_lighting100_full_events.csv` |
@@ -120,6 +140,17 @@ Latest online VLA-sim result:
 | Always Close, matched seed | `80` | `0.5375` | `0.2182` | `1.0000` | `0.0000` | `0.0000` |
 | Visual Refusal + Reapproach | `80` | `0.5875` | `0.1132` | `0.8833` | `0.1167` | `0.0000` |
 
+Latest language-conditioned wrong-object result:
+
+| Result | Method | Oracle Geometry? | False-Accept Risk | Wrong-Object FAR | Acceptance | Note |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Offline holdout400 | `visual_language` | `no` | `0.0900` | `0.0000` | `0.5000` | fair camera+language result |
+| Offline holdout400 | `distance_only` | `yes` | `0.3700` | `0.3700` | `0.5000` | true simulator geometry baseline |
+| Offline holdout400 | `estimated_geometry_proxy` | `no` | `0.4650` | `0.3350` | `0.5000` | image-summary geometry proxy |
+| Online | Always Close | `no` | `0.4795` | `0.2877` | `1.0000` | accepted `21` wrong-object closes |
+| Online | Visual+Language Refusal | `no` | `0.1154` | `0.0000` | `0.4444` | accepted `0` wrong-object closes |
+| Online | Full Language Refusal | `yes` | `0.0444` | `0.0000` | `0.3516` | oracle-assisted upper bound |
+
 Latest VLA robustness results, evaluating main600 checkpoints on shifted simulator data:
 
 | Feature Group | Shift | Events | False-Accept Risk | Accepted Success | Acceptance Rate | Refusal Rate |
@@ -135,12 +166,12 @@ Latest VLA robustness results, evaluating main600 checkpoints on shifted simulat
 | `robot_visual` | object shift | `100` | `0.0411` | `0.9589` | `0.7300` | `0.2700` |
 | `robot_visual` | approach noise `0.03` | `100` | `0.1163` | `0.8837` | `0.4300` | `0.5700` |
 
-Current VLA-sim conclusion: proposal-scale simulation is complete for the main single-object setting. Visual features
-are the best learned feature group on the independent holdout, but oracle distance is still slightly stronger on that
-same holdout. Matched clutter analysis shows distance still separates failures too well. A new language-conditioned
-wrong-object pilot finally makes geometry lose at matched acceptance, but it is small-scale and should be expanded
-before final claims. Sampled SmolVLA action uncertainty alone is weak. Lighting shift exposes a clear robustness gap
-because camera-heavy checkpoints over-refuse.
+Current VLA-sim conclusion: proposal-scale simulation is complete for the main single-object setting, and the scaled
+language-conditioned wrong-object benchmark is now complete at `600` train / `400` holdout. Visual features are the best
+learned group on the single-object holdout, but oracle distance is still slightly stronger there. In the wrong-object
+benchmark, no-oracle `visual_language` beats distance and robot-state geometry at matched acceptance, with `0.0000`
+wrong-object false accepts on the `400`-event holdout. Sampled SmolVLA action uncertainty alone is weak. Lighting shift
+still exposes a robustness gap because camera-heavy checkpoints over-refuse.
 
 Simulation-only proxy baselines can be regenerated without launching IsaacLab:
 
@@ -152,7 +183,7 @@ conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_simulat
   --output-md logs/hsi_pregrasp/vla/language_wrong_object_proxy_baselines.md
 ```
 
-Latest proxy result at the same `0.30` acceptance used by the language matched comparison:
+Pilot proxy result at the same `0.30` acceptance used by the small language matched comparison:
 
 | Dataset | Method | Oracle geometry? | FAR | Accepted success | Wrong-object FAR |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -1030,6 +1061,163 @@ Proxy geometry result on the same 40-event language holdout:
 The proxy artifact also writes failure-type splits. In this pilot, both proxy and oracle geometry still accept some
 wrong-object events; the no-oracle `visual_language` learned head has `0.0000` wrong-object FAR at matched acceptance.
 
+Scaled language-conditioned wrong-object benchmark:
+
+This is the main simulator answer to the proposal concern that geometry was too strong. The camera scene uses the
+default cube plus blue/red/green/yellow distractors. The language instruction sometimes asks for a colored cube, while
+the state-machine policy still moves to the default cube. That creates close events where the robot is geometrically
+near an object, but accepting the close is wrong for the target instruction. Simulator labels remain automatic.
+
+Driver note: these runs were completed after switching to NVIDIA driver `580.159.03` and clearing the Isaac Sim shader
+cache. Driver `595.71.05` crashed in the RTX renderer for camera-enabled jobs on this machine.
+
+Collection commands:
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 300 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 922 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 --stall_steps 2500 \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_train300_camera_events.csv
+
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 200 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 923 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 --stall_steps 2500 \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_holdout200_camera_events.csv
+
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 300 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 924 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 --stall_steps 2500 \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_train300b_camera_events.csv
+
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 200 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 925 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 --stall_steps 2500 \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_holdout200b_camera_events.csv
+```
+
+Small wrong-object VLA-uncertainty subset:
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 4 --num_events 40 \
+  --variant distractors --num_distractors 4 \
+  --vla_samples 2 --vla_device cuda \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 926 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 20000 --stall_steps 2500 \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_vla40_events.csv
+```
+
+The two train shards were merged into
+`logs/hsi_pregrasp/vla/language_wrong_object_main600_camera_events.csv`, and the two holdout shards were merged into
+`logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv`.
+
+Scaled dataset distributions:
+
+| Dataset | Events | Successes | Failures | Non-Default Targets | Wrong-Object Lift Reasons | Nonzero Camera Rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `train300_camera` | `300` | `136` | `164` | `115` | `88` | `300` |
+| `holdout200_camera` | `200` | `92` | `108` | `70` | `55` | `200` |
+| `train300b_camera` | `300` | `144` | `156` | `103` | `83` | `300` |
+| `holdout200b_camera` | `200` | `103` | `97` | `74` | `61` | `200` |
+| `main600_camera` | `600` | `280` | `320` | `218` | `171` | `600` |
+| `holdout400_camera` | `400` | `195` | `205` | `144` | `116` | `400` |
+| `vla40` | `40` | `22` | `18` | `14` | `9` | `40` |
+
+The `vla40` subset has nonzero SmolVLA uncertainty on every row: mean `vla_inference_ms=334.6038`,
+mean `vla_action_var_mean=0.00688371`, and max `vla_action_var_mean=0.03047525`.
+
+Feature-group training command:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_feature_group_ablation.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_main600_camera_events.csv \
+  --eval-input logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_camera_main600_ablation.json \
+  --checkpoint-dir logs/hsi_pregrasp/vla/checkpoints_language_camera_main600 \
+  --feature-groups robot_state,visual,language,visual_language,robot_visual,robot_visual_language,full,full_language,vla_action_uncertainty \
+  --epochs 200 \
+  --seed 74 \
+  --device cpu
+```
+
+Matched-acceptance command:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_matched_acceptance_ci.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv \
+  --title "Language Wrong-Object Camera Main600 Holdout400" \
+  --reference-checkpoint visual_language=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/visual_language_refusal_head.pt \
+  --checkpoint language=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/language_refusal_head.pt \
+  --checkpoint visual=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/visual_refusal_head.pt \
+  --checkpoint robot_state=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/robot_state_refusal_head.pt \
+  --checkpoint robot_visual_language=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/robot_visual_language_refusal_head.pt \
+  --checkpoint full_language=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/full_language_refusal_head.pt \
+  --scalar distance_only=ee_object_distance:low \
+  --scalar lateral_error_only=ee_object_lateral_error:low \
+  --include-always-close \
+  --include-matched-random \
+  --bootstrap 2000 \
+  --seed 44 \
+  --device cpu \
+  --output-json logs/hsi_pregrasp/vla/language_wrong_object_camera_main600_matched_ci.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_camera_main600_matched_ci.md
+```
+
+Matched-acceptance scaled wrong-object result on the `400`-event holdout:
+
+| Method | Oracle Geometry? | False-Accept Risk, 95% CI | Accepted Success, 95% CI | Wrong-Object FAR, 95% CI | Acceptance, 95% CI |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `visual_language` | `no` | `0.0900` [`0.0503`, `0.1337`] | `0.9100` [`0.8689`, `0.9474`] | `0.0000` [`0.0000`, `0.0000`] | `0.5000` [`0.4525`, `0.5475`] |
+| `matched_random` | `no` | `0.5128` [`0.4650`, `0.5650`] | `0.4872` [`0.4350`, `0.5350`] | `0.3604` [`0.3150`, `0.4100`] | `0.5000` [`0.5000`, `0.5000`] |
+| `language` | `no` | `0.2450` [`0.1872`, `0.3069`] | `0.7550` [`0.6908`, `0.8129`] | `0.0000` [`0.0000`, `0.0000`] | `0.5000` [`0.4500`, `0.5475`] |
+| `visual` | `no` | `0.4400` [`0.3700`, `0.5080`] | `0.5600` [`0.4947`, `0.6283`] | `0.3650` [`0.3021`, `0.4342`] | `0.5000` [`0.4500`, `0.5500`] |
+| `robot_state` | `yes` | `0.3500` [`0.2844`, `0.4192`] | `0.6500` [`0.5860`, `0.7198`] | `0.3500` [`0.2872`, `0.4167`] | `0.5000` [`0.4525`, `0.5475`] |
+| `robot_visual_language` | `yes` | `0.0400` [`0.0153`, `0.0688`] | `0.9600` [`0.9300`, `0.9848`] | `0.0050` [`0.0000`, `0.0157`] | `0.5000` [`0.4550`, `0.5450`] |
+| `full_language` | `yes` | `0.0350` [`0.0109`, `0.0625`] | `0.9650` [`0.9366`, `0.9898`] | `0.0100` [`0.0000`, `0.0254`] | `0.5000` [`0.4500`, `0.5475`] |
+| `distance_only` | `yes` | `0.3700` [`0.3028`, `0.4369`] | `0.6300` [`0.5634`, `0.6961`] | `0.3700` [`0.3022`, `0.4352`] | `0.5000` [`0.4500`, `0.5475`] |
+| `lateral_error_only` | `yes` | `0.3750` [`0.3073`, `0.4466`] | `0.6250` [`0.5591`, `0.6919`] | `0.3750` [`0.3092`, `0.4410`] | `0.5000` [`0.4500`, `0.5475`] |
+
+Proxy geometry command:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_simulation_proxy_baselines.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv \
+  --target-acceptance-rate 0.50 \
+  --output-json logs/hsi_pregrasp/vla/language_wrong_object_camera_main600_proxy_baselines.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_camera_main600_proxy_baselines.md
+```
+
+Proxy geometry result at matched `0.50` acceptance:
+
+| Method | Oracle Geometry? | False-Accept Risk | Accepted Success | Wrong-Object FAR | Acceptance |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `always_close` | `no` | `0.5125` | `0.4875` | `0.3600` | `1.0000` |
+| `estimated_geometry_proxy` | `no` | `0.4650` | `0.5350` | `0.3350` | `0.5000` |
+| `oracle_geometry_upper_bound` | `yes` | `0.3900` | `0.6100` | `0.3900` | `0.5000` |
+
+Interpretation: this is the clean simulator win the proposal needed. At matched acceptance, no-oracle
+`visual_language` has `0.0900` false-accept risk and zero wrong-object false accepts, while distance-only has `0.3700`
+false-accept risk and accepts wrong-object cases. The oracle/full geometry-assisted heads are useful upper bounds, not
+the fair main comparison.
+
 Online VLA visual refusal, using the main600 visual checkpoint:
 
 ```bash
@@ -1090,6 +1278,70 @@ Online VLA comparison:
 
 The online visual run used `--skip_vla` because the selected checkpoint uses only camera summary features; this avoids
 unneeded repeated SmolVLA sampling during online evaluation.
+
+Online language-conditioned wrong-object refusal:
+
+Always-close baseline:
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/run_online_vla_refusal_eval.py \
+  --headless --device cuda:0 --decision_mode always_close \
+  --num_envs 16 --num_episodes 100 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 1022 --approach_noise_std 0.02 --retry_noise_std 0.02 \
+  --label_horizon_s 1.0 --rendering_mode performance --max_steps 50000 \
+  --output logs/hsi_pregrasp/vla/online_language_wrong_object_main600_always_close_events.csv \
+  --summary logs/hsi_pregrasp/vla/online_language_wrong_object_main600_always_close_summary.json
+```
+
+No-oracle visual+language refusal:
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/run_online_vla_refusal_eval.py \
+  --headless --device cuda:0 --decision_mode model \
+  --checkpoint logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/visual_language_refusal_head.pt \
+  --num_envs 16 --num_episodes 100 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 1023 --approach_noise_std 0.02 --retry_noise_std 0.02 \
+  --max_refusals_per_episode 3 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 \
+  --output logs/hsi_pregrasp/vla/online_language_wrong_object_main600_visual_language_events.csv \
+  --summary logs/hsi_pregrasp/vla/online_language_wrong_object_main600_visual_language_summary.json
+```
+
+Full geometry+visual+language refusal:
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/run_online_vla_refusal_eval.py \
+  --headless --device cuda:0 --decision_mode model \
+  --checkpoint logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/full_language_refusal_head.pt \
+  --num_envs 16 --num_episodes 100 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 1024 --approach_noise_std 0.02 --retry_noise_std 0.02 \
+  --max_refusals_per_episode 3 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 \
+  --output logs/hsi_pregrasp/vla/online_language_wrong_object_main600_full_language_events.csv \
+  --summary logs/hsi_pregrasp/vla/online_language_wrong_object_main600_full_language_summary.json
+```
+
+Online wrong-object result:
+
+| Policy | Oracle Geometry? | Completed Episodes | Episode Success | False-Accept Risk | Wrong-Object Accepted | Wrong-Object FAR | Acceptance | Refusal | Robot Time / Success | Attempts / Success |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Always Close | `no` | `112` | `0.3393` | `0.4795` | `21` | `0.2877` | `1.0000` | `0.0000` | `14.7368 s` | `1.9211` |
+| Visual+Language Refusal | `no` | `112` | `0.4107` | `0.1154` | `0` | `0.0000` | `0.4444` | `0.5556` | `12.1739 s` | `1.1304` |
+| Full Language Refusal | `yes` | `112` | `0.3839` | `0.0444` | `0` | `0.0000` | `0.3516` | `0.6484` | `13.0233 s` | `1.0465` |
+
+Interpretation: the fair no-oracle online result is the visual+language row. It refused all `52` colored-target
+wrong-object pre-grasp events, accepted no wrong-object closes, improved episode success versus always-close, and cut
+attempts per success from `1.9211` to `1.1304`. The full-language row is stronger on aggregate risk, but it uses true
+simulator geometry and should be framed as an oracle-assisted upper-bound policy.
 
 Distractor smoke:
 
@@ -1350,10 +1602,10 @@ Observed result: the RTX 4060 Laptop GPU was active at `100%` overall GPU utiliz
 around `83%` SM, `52%` memory utilization, and about `5.7 GB` VRAM used. CPU usage is still expected because Isaac Sim
 uses CPU work for simulation, camera readback, preprocessing, CSV writing, and Python orchestration.
 
-Current boot note from `2026-05-22`: `lspci` still sees the RTX 4060, but `nvidia-smi` cannot communicate with the
-NVIDIA driver, `/dev/nvidia*` is missing, and `torch.cuda.is_available()` is `False` inside `env_isaaclab`. Long
-IsaacLab GPU collection/online runs are blocked on loading or reinstalling the NVIDIA kernel driver for the active
-`6.17.0-29-generic` kernel.
+Current boot note from `2026-05-22`: the RTX 4060 Laptop GPU is working with NVIDIA driver `580.159.03` on kernel
+`6.17.0-29-generic`. `nvidia-smi` reports the GPU, Isaac Sim uses Vulkan on the NVIDIA device, camera rendering works,
+and the online camera jobs ran on `cuda:0`. The earlier blocked state was caused by the driver/kernel mismatch and RTX
+camera crash under driver `595.71.05`.
 
 ## Timing
 
@@ -1369,6 +1621,15 @@ Observed on this machine:
 - camera-enabled VLA holdout/online: about `328-333 ms/event` of SmolVLA inference with `vla_samples=2`
 - proposal-scale VLA main collection: `600` events completed in about `78 minutes`
 - proposal-scale VLA holdout collection: `400` events completed in about `56 minutes`
+- driver-580 camera smoke: completed at `2026-05-22 10:07:57 +0700`
+- driver-580 camera + SmolVLA smoke: completed at `2026-05-22 10:14:37 +0700`
+- language wrong-object camera shards: `300`, `200`, `300`, and `200` events completed between `10:47` and `12:08`
+  Bangkok time; merged `600/400` files were written at `12:08:51`
+- online wrong-object always-close: summary written at `2026-05-22 12:20:04 +0700`
+- online wrong-object visual+language: about `10-11 minutes`; summary written at `12:36:33 +0700`
+- online wrong-object full-language: about `10 minutes`; summary written at `12:46:42 +0700`
+- language wrong-object VLA subset: `40` events with `vla_samples=2` completed at `12:59:10 +0700`; mean SmolVLA
+  inference was `334.6038 ms/event`
 - feature-group ablation training over the main CSV: seconds on CPU once the CSV exists
 
 The expensive part is simulation/data collection and repeated SmolVLA inference, not refusal-head training.
@@ -1393,6 +1654,9 @@ These are estimates from short runs. Long IsaacLab camera jobs can stall or slow
 - SmolVLA currently provides sampled 6-D action uncertainty, not a true gripper-close log-probability.
 - The early VLA pilot is only `95` events because the requested 150-event run stopped writing rows and was interrupted;
   the later main run completed `600` events cleanly.
+- The scaled language wrong-object `600/400` camera dataset used `--skip_vla` for speed; it tests camera summaries plus
+  target-language features. SmolVLA uncertainty in the same language setting was validated with the smaller
+  `language_wrong_object_vla40_events.csv` subset.
 - Visual features are simple image summary statistics, not learned visual embeddings yet.
 - Lighting shift currently causes severe over-refusal for camera-heavy checkpoints.
 - The calibration procedure is empirical selective-risk calibration. Do not claim a formal conformal guarantee yet.
@@ -1429,7 +1693,13 @@ Completed in this scaffold:
 - no-oracle matched-acceptance holdout table with confidence intervals
 - matched-acceptance clutter table with confidence intervals
 - multi-object/language wrong-object pilot with automatic simulator labels
+- scaled multi-object/language wrong-object camera dataset with `600` train and `400` holdout events
+- matched-acceptance wrong-object table showing no-oracle `visual_language` beating distance and robot-state geometry
+- image-summary estimated-geometry proxy and oracle-geometry upper-bound results for the scaled wrong-object holdout
 - language-conditioned online simulator evaluation code path, including `always_close` mode and wrong-object metrics
+- long online wrong-object GPU run after driver recovery: always-close, no-oracle visual+language, and full-language
+  refusal/reapproach policies
+- small wrong-object SmolVLA uncertainty subset with `40` camera events and `vla_samples=2`
 - image-summary estimated-geometry proxy baseline and oracle-geometry upper-bound script
 - failure-type split summaries for aggregate, wrong-object, geometric/approach, occlusion/clutter, shift, and success
 - report-ready plot assets for feature groups, robustness, online robustness, and threshold tuning
@@ -1437,10 +1707,8 @@ Completed in this scaffold:
 Not yet completed:
 
 - learned visual embeddings or RGB-D features
-- final-scale non-geometric wrong-object dataset where distance/pose can no longer separate failures
 - target-aware multi-object controller that can actually choose and lift the requested colored cube
-- long online wrong-object GPU run with the new language-aware online path; currently blocked by the NVIDIA driver not
-  being loaded on this boot
+- final-scale VLA-uncertainty wrong-object dataset; a `40`-event subset exists, but not a full `600/400` VLA-sampled run
 - true VLA gripper-close probability; unavailable in the current 6-D SmolVLA action interface
 - real robot smoke/pilot/main calibration/final test
 - final paper polish around plots/tables
@@ -1463,10 +1731,10 @@ Estimated remaining time:
 
 | Work | Estimated Time |
 | --- | ---: |
-| Scale language wrong-object pilot to `300/200` or `600/400` | `0.5-1 day` |
 | Tune physical wrong-object/occlusion condition and collect enough failures | `0.5-1.5 days` |
 | Add target-aware multi-object controller for colored-cube lift | `1-3 days` |
 | Add learned visual embeddings or RGB-D features | `1-3 days` |
+| Full VLA-uncertainty wrong-object `600/400` collection | `1-3 days` |
 | Tune/calibrate online thresholds with a held-out robustness calibration protocol | `0.5-1 day` |
 | Real robot 30-event smoke test | `0.5 day` |
 | Real robot 150-event pilot | `1 day` |
@@ -1476,18 +1744,18 @@ Estimated remaining time:
 
 Practical total estimate:
 
-- Simulator-only version: mostly complete
+- Simulator-only version: complete for the implemented single-object, robustness, and language wrong-object benchmarks
 - VLA-in-simulation version: mostly complete for the implemented simulator variants; about `1-3 working days` remain for
-  stronger vision and final threshold protocol polish
+  stronger learned vision, full-scale VLA-uncertainty wrong-object runs, and final threshold protocol polish
 - Full proposal with real robot data and paper-ready figures: about `3-5 weeks`
 
 ## Next Steps
 
-1. Scale the language-conditioned wrong-object pilot to `300/200` or `600/400` events.
-2. Tune the physical `wrong_object` / occlusion simulator so it produces enough close events where distance is good but
+1. Tune the physical `wrong_object` / occlusion simulator so it produces enough close events where distance is good but
    the target lift still fails.
-3. Add a target-aware multi-object controller that can actually choose and lift the requested colored cube.
-4. Add learned visual embeddings or RGB-D features if camera summary features remain too brittle.
+2. Add a target-aware multi-object controller that can actually choose and lift the requested colored cube.
+3. Add learned visual embeddings or RGB-D features if camera summary features remain too brittle.
+4. If needed for the paper, scale the `vla40` wrong-object uncertainty subset to a full `600/400` VLA-sampled run.
 5. Tune/calibrate online thresholds with a held-out robustness calibration protocol.
 6. Move to real robot calibration with the same event schema once hardware/logging access exists.
 7. Freeze the threshold before final test runs and report false-accept risk, acceptance rate, task success after
