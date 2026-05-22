@@ -142,6 +142,25 @@ wrong-object pilot finally makes geometry lose at matched acceptance, but it is 
 before final claims. Sampled SmolVLA action uncertainty alone is weak. Lighting shift exposes a clear robustness gap
 because camera-heavy checkpoints over-refuse.
 
+Simulation-only proxy baselines can be regenerated without launching IsaacLab:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_simulation_proxy_baselines.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_smoke40_events.csv \
+  --target-acceptance-rate 0.30 \
+  --output-json logs/hsi_pregrasp/vla/language_wrong_object_proxy_baselines.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_proxy_baselines.md
+```
+
+Latest proxy result at the same `0.30` acceptance used by the language matched comparison:
+
+| Dataset | Method | Oracle geometry? | FAR | Accepted success | Wrong-object FAR |
+| --- | --- | --- | ---: | ---: | ---: |
+| `language_wrong_object_smoke40` | `estimated_geometry_proxy` | `no` | `0.5833` | `0.4167` | `0.4167` |
+| `language_wrong_object_smoke40` | `oracle_geometry_upper_bound` | `yes` | `0.2500` | `0.7500` | `0.2500` |
+| `holdout400` | `estimated_geometry_proxy` | `no` | `0.2000` | `0.8000` | `0.0000` |
+| `holdout400` | `oracle_geometry_upper_bound` | `yes` | `0.0000` | `1.0000` | `0.0000` |
+
 ## Research Question
 
 Which signals are sufficient for a VLA robot to decide whether to physically commit to gripper closure?
@@ -166,6 +185,7 @@ In this simulator scaffold, the first signal set is:
 - `hsi_pregrasp_refusal/metrics.py`: selective close/refuse metrics
 - `hsi_pregrasp_refusal/vision.py`: RGB tensor conversion and simple visual summaries
 - `hsi_pregrasp_refusal/vla.py`: SmolVLA adapter and sampled action-uncertainty summaries
+- `hsi_pregrasp_refusal/sim_analysis.py`: simulation-only language, proxy-baseline, and failure-type summaries
 - `hsi_pregrasp_refusal/isaaclab_vla_scene.py`: camera-enabled lift scene and simulator variants
 - `hsi_pregrasp_refusal/state_machine.py`: shared Franka lift state machine
 - `scripts/collect_lift_cube_pregrasp.py`: IsaacLab data collector
@@ -174,6 +194,7 @@ In this simulator scaffold, the first signal set is:
 - `scripts/evaluate_refusal.py`: evaluate a trained checkpoint
 - `scripts/run_offline_baselines.py`: scalar and matched-random offline baselines
 - `scripts/run_matched_acceptance_ci.py`: matched-acceptance comparisons with bootstrap confidence intervals
+- `scripts/run_simulation_proxy_baselines.py`: always-close, image-summary estimated-geometry proxy, and oracle-geometry upper bound
 - `scripts/run_online_vla_refusal_eval.py`: camera/VLA online refusal and reapproach evaluation
 - `scripts/run_feature_group_ablation.py`: train/evaluate feature-group heads
 - `scripts/make_results_table.py`: generate markdown result tables from JSON summaries
@@ -973,20 +994,41 @@ conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_matched
 
 Matched-acceptance language pilot result:
 
-| Method | Oracle Geometry? | False-Accept Risk, 95% CI | Accepted Success, 95% CI | Acceptance, 95% CI |
-| --- | --- | ---: | ---: | ---: |
-| `visual_language` | `no` | `0.1667` [`0.0000`, `0.4167`] | `0.8333` [`0.6000`, `1.0000`] | `0.3000` [`0.1750`, `0.4500`] |
-| `matched_random` | `no` | `0.4507` [`0.2500`, `0.6667`] | `0.5493` [`0.3333`, `0.7500`] | `0.3000` [`0.3000`, `0.3000`] |
-| `language` | `no` | `0.2500` [`0.0000`, `0.5385`] | `0.7500` [`0.4665`, `1.0000`] | `0.3000` [`0.1500`, `0.4500`] |
-| `visual` | `no` | `0.3333` [`0.0909`, `0.6154`] | `0.6667` [`0.3750`, `0.9167`] | `0.3000` [`0.1750`, `0.4500`] |
-| `robot_state` | `yes` | `0.4167` [`0.1429`, `0.7143`] | `0.5833` [`0.2857`, `0.8750`] | `0.3000` [`0.1750`, `0.4500`] |
-| `robot_visual_language` | `yes` | `0.0000` [`0.0000`, `0.0000`] | `1.0000` [`1.0000`, `1.0000`] | `0.3000` [`0.1500`, `0.4500`] |
-| `oracle_distance_only` | `yes` | `0.2500` [`0.0000`, `0.5008`] | `0.7500` [`0.5000`, `1.0000`] | `0.3000` [`0.1744`, `0.4500`] |
+| Method | Oracle Geometry? | False-Accept Risk, 95% CI | Accepted Success, 95% CI | Wrong-Object FAR, 95% CI | Acceptance, 95% CI |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `visual_language` | `no` | `0.1667` [`0.0000`, `0.4167`] | `0.8333` [`0.6000`, `1.0000`] | `0.0000` [`0.0000`, `0.0000`] | `0.3000` [`0.1750`, `0.4500`] |
+| `matched_random` | `no` | `0.4459` [`0.2500`, `0.6667`] | `0.5541` [`0.3333`, `0.7500`] | `0.2742` [`0.0833`, `0.5000`] | `0.3000` [`0.3000`, `0.3000`] |
+| `language` | `no` | `0.2500` [`0.0000`, `0.5008`] | `0.7500` [`0.5000`, `1.0000`] | `0.0000` [`0.0000`, `0.0000`] | `0.3000` [`0.1750`, `0.4500`] |
+| `visual` | `no` | `0.3333` [`0.0769`, `0.6250`] | `0.6667` [`0.3747`, `0.9167`] | `0.2500` [`0.0000`, `0.5333`] | `0.3000` [`0.1500`, `0.4500`] |
+| `robot_state` | `yes` | `0.4167` [`0.1429`, `0.7273`] | `0.5833` [`0.3000`, `0.8750`] | `0.4167` [`0.1250`, `0.7143`] | `0.3000` [`0.1500`, `0.4500`] |
+| `robot_visual_language` | `yes` | `0.0000` [`0.0000`, `0.0000`] | `1.0000` [`1.0000`, `1.0000`] | `0.0000` [`0.0000`, `0.0000`] | `0.3000` [`0.1750`, `0.4500`] |
+| `oracle_distance_only` | `yes` | `0.2500` [`0.0000`, `0.5335`] | `0.7500` [`0.4705`, `1.0000`] | `0.2500` [`0.0000`, `0.5000`] | `0.3000` [`0.1750`, `0.4500`] |
 
 Interpretation: this pilot is the first completed simulator condition where geometry loses at matched acceptance.
 No-oracle `visual_language` beats robot-state geometry and distance-only on the 40-event holdout. The confidence
 intervals are wide because the holdout is small; scale this to at least `300/200` or `600/400` before making a final
 paper claim.
+
+Simulation-only proxy geometry command:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_simulation_proxy_baselines.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_smoke40_events.csv \
+  --target-acceptance-rate 0.30 \
+  --output-json logs/hsi_pregrasp/vla/language_wrong_object_proxy_baselines.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_proxy_baselines.md
+```
+
+Proxy geometry result on the same 40-event language holdout:
+
+| Method | Oracle Geometry? | False-Accept Risk | Accepted Success | Wrong-Object FAR | Acceptance |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `always_close` | `no` | `0.4500` | `0.5500` | `0.2750` | `1.0000` |
+| `estimated_geometry_proxy` | `no` | `0.5833` | `0.4167` | `0.4167` | `0.3000` |
+| `oracle_geometry_upper_bound` | `yes` | `0.2500` | `0.7500` | `0.2500` | `0.3000` |
+
+The proxy artifact also writes failure-type splits. In this pilot, both proxy and oracle geometry still accept some
+wrong-object events; the no-oracle `visual_language` learned head has `0.0000` wrong-object FAR at matched acceptance.
 
 Online VLA visual refusal, using the main600 visual checkpoint:
 
@@ -1308,6 +1350,11 @@ Observed result: the RTX 4060 Laptop GPU was active at `100%` overall GPU utiliz
 around `83%` SM, `52%` memory utilization, and about `5.7 GB` VRAM used. CPU usage is still expected because Isaac Sim
 uses CPU work for simulation, camera readback, preprocessing, CSV writing, and Python orchestration.
 
+Current boot note from `2026-05-22`: `lspci` still sees the RTX 4060, but `nvidia-smi` cannot communicate with the
+NVIDIA driver, `/dev/nvidia*` is missing, and `torch.cuda.is_available()` is `False` inside `env_isaaclab`. Long
+IsaacLab GPU collection/online runs are blocked on loading or reinstalling the NVIDIA kernel driver for the active
+`6.17.0-29-generic` kernel.
+
 ## Timing
 
 Observed on this machine:
@@ -1382,6 +1429,9 @@ Completed in this scaffold:
 - no-oracle matched-acceptance holdout table with confidence intervals
 - matched-acceptance clutter table with confidence intervals
 - multi-object/language wrong-object pilot with automatic simulator labels
+- language-conditioned online simulator evaluation code path, including `always_close` mode and wrong-object metrics
+- image-summary estimated-geometry proxy baseline and oracle-geometry upper-bound script
+- failure-type split summaries for aggregate, wrong-object, geometric/approach, occlusion/clutter, shift, and success
 - report-ready plot assets for feature groups, robustness, online robustness, and threshold tuning
 
 Not yet completed:
@@ -1389,6 +1439,8 @@ Not yet completed:
 - learned visual embeddings or RGB-D features
 - final-scale non-geometric wrong-object dataset where distance/pose can no longer separate failures
 - target-aware multi-object controller that can actually choose and lift the requested colored cube
+- long online wrong-object GPU run with the new language-aware online path; currently blocked by the NVIDIA driver not
+  being loaded on this boot
 - true VLA gripper-close probability; unavailable in the current 6-D SmolVLA action interface
 - real robot smoke/pilot/main calibration/final test
 - final paper polish around plots/tables
@@ -1440,4 +1492,3 @@ Practical total estimate:
 6. Move to real robot calibration with the same event schema once hardware/logging access exists.
 7. Freeze the threshold before final test runs and report false-accept risk, acceptance rate, task success after
    re-approach, robot time per success, and attempts per success.
-# hsi_pregrasp_refusal
