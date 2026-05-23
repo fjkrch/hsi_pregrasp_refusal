@@ -7,7 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .features import ALL_FEATURE_COLUMNS, PREGRASP_FEATURE_COLUMNS
+from .features import (
+    ALL_FEATURE_COLUMNS,
+    COMPUTED_FEATURE_COLUMNS,
+    PREGRASP_FEATURE_COLUMNS,
+    feature_vector,
+)
 
 
 EXCLUDED_COLUMNS = {
@@ -31,6 +36,8 @@ EXCLUDED_COLUMNS = {
     "language_mode",
     "language_instruction",
     "language_target",
+    "failure_type",
+    "geometry_good_pregrasp",
 }
 
 
@@ -75,10 +82,19 @@ def load_event_csv(
     if not rows:
         raise ValueError(f"No rows found in {path}")
     columns = infer_feature_columns(rows) if feature_columns is None else feature_columns
-    missing = [column for column in columns + [label_column] if column not in rows[0]]
+    missing = [
+        column
+        for column in columns
+        if column not in rows[0] and column not in COMPUTED_FEATURE_COLUMNS
+    ]
+    if label_column not in rows[0]:
+        missing.append(label_column)
     if missing:
         raise ValueError(f"Missing required columns in {path}: {missing}")
 
-    features = np.asarray([[float(row[column]) for column in columns] for row in rows], dtype=np.float32)
+    try:
+        features = np.asarray([feature_vector(row, columns) for row in rows], dtype=np.float32)
+    except KeyError as exc:
+        raise ValueError(f"Missing required column in {path}: {exc.args[0]}") from exc
     labels = np.asarray([bool(int(float(row[label_column]))) for row in rows], dtype=bool)
     return features, labels, columns, rows

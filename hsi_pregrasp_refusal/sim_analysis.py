@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 
 import numpy as np
 
-from .features import LANGUAGE_TARGETS, PREGRASP_FEATURE_COLUMNS
+from .features import LANGUAGE_TARGETS, PREGRASP_FEATURE_COLUMNS, visual_proxy_feature_row
 from .metrics import compute_refusal_metrics
 
 
@@ -58,6 +58,11 @@ def wrong_object_mask(rows: Iterable[Mapping[str, object]]) -> np.ndarray:
 
 def failure_type(row: Mapping[str, object]) -> str:
     """Assign a coarse simulation failure bucket from existing CSV metadata."""
+    explicit = str(row.get("failure_type", "") or "").lower()
+    if explicit in {"wrong_object", "geometric_approach", "shift", "success"}:
+        return explicit
+    if explicit in {"clutter", "partial_occlusion", "occlusion_clutter"}:
+        return "occlusion_clutter"
     target = str(row.get("language_target", "") or "")
     reason = str(row.get("label_reason", "") or "").lower()
     variant = str(row.get("variant", "") or "").lower()
@@ -111,21 +116,17 @@ def estimated_geometry_proxy_scores(rows: list[Mapping[str, object]]) -> np.ndar
     textured, high-contrast object evidence in the stored camera summaries and treats
     weak evidence as higher pre-grasp risk.
     """
-    raw_safety = []
+    raw_evidence = []
+    raw_disagreement = []
     for row in rows:
-        per_camera = []
-        for camera in ["camera1", "camera2", "camera3"]:
-            center = _row_float(row, f"{camera}_center_mean")
-            edge = _row_float(row, f"{camera}_edge_mean")
-            center_std = _row_float(row, f"{camera}_center_std")
-            red = _row_float(row, f"{camera}_red_mean")
-            green = _row_float(row, f"{camera}_green_mean")
-            blue = _row_float(row, f"{camera}_blue_mean")
-            color_separation = max(red, green, blue) - min(red, green, blue)
-            center_contrast = abs(center - _row_float(row, f"{camera}_rgb_mean"))
-            per_camera.append(0.35 * center_contrast + 0.30 * edge + 0.20 * center_std + 0.15 * color_separation)
-        raw_safety.append(float(np.mean(per_camera)))
-    safety = _robust_minmax(np.asarray(raw_safety, dtype=np.float64))
+        proxy = visual_proxy_feature_row(row)
+        raw_evidence.append(proxy["visual_proxy_evidence_score"])
+        raw_disagreement.append(
+            proxy["visual_proxy_camera_rgb_disagreement"] + proxy["visual_proxy_center_mean_disagreement"]
+        )
+    evidence = _robust_minmax(np.asarray(raw_evidence, dtype=np.float64))
+    disagreement = _robust_minmax(np.asarray(raw_disagreement, dtype=np.float64))
+    safety = np.clip(evidence - 0.20 * disagreement, 0.0, 1.0)
     return (1.0 - safety).astype(np.float64)
 
 

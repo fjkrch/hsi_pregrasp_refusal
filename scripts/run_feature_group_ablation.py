@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from hsi_pregrasp_refusal.features import FEATURE_GROUPS  # noqa: E402
+from hsi_pregrasp_refusal.sim_analysis import has_oracle_geometry_columns  # noqa: E402
 
 
 def _run_json(cmd: list[str]) -> dict:
@@ -21,11 +22,52 @@ def _run_json(cmd: list[str]) -> dict:
     return json.loads(result.stdout)
 
 
+def _format(value: object) -> str:
+    if value is None:
+        return "`n/a`"
+    if isinstance(value, float):
+        return f"`{value:.4f}`"
+    return f"`{value}`"
+
+
+def _write_markdown(path: Path, summary: dict) -> None:
+    lines = [
+        "# Feature Group Ablation",
+        "",
+        f"- Train input: `{summary['input']}`",
+        f"- Eval input: `{summary['eval_input']}`",
+        f"- Target false-accept risk: `{summary['target_false_accept_risk']:.4f}`",
+        "",
+        "| Feature group | Features | Oracle geometry? | Eval FAR | Accepted success | Acceptance | Refusal |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for group, result in summary["results"].items():
+        columns = result["train"]["feature_columns"]
+        metrics = result["eval"]["metrics"]
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    f"`{group}`",
+                    _format(len(columns)),
+                    "`yes`" if has_oracle_geometry_columns(columns) else "`no`",
+                    _format(metrics["false_accept_risk"]),
+                    _format(metrics["accepted_success"]),
+                    _format(metrics["acceptance_rate"]),
+                    _format(metrics["refusal_rate"]),
+                ]
+            )
+            + " |"
+        )
+    path.write_text("\n".join(lines) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run feature-group ablations for VLA/camera pre-grasp datasets.")
     parser.add_argument("--input", required=True, help="Training/calibration/test CSV.")
     parser.add_argument("--eval-input", required=True, help="Independent evaluation CSV.")
     parser.add_argument("--output", default="logs/hsi_pregrasp/vla/feature_group_ablations.json")
+    parser.add_argument("--output-md", default=None, help="Optional markdown table path.")
     parser.add_argument("--checkpoint-dir", default="logs/hsi_pregrasp/vla/checkpoints")
     parser.add_argument(
         "--feature-groups",
@@ -87,8 +129,21 @@ def main():
         )
         results[group] = {"train": train_summary, "eval": eval_summary}
 
-    output.write_text(json.dumps(results, indent=2))
-    print(json.dumps({"output": str(output), "results": results}, indent=2))
+    summary = {
+        "input": args.input,
+        "eval_input": args.eval_input,
+        "target_false_accept_risk": float(args.target_false_accept_risk),
+        "epochs": int(args.epochs),
+        "seed": int(args.seed),
+        "results": results,
+    }
+    output.write_text(json.dumps(summary, indent=2))
+    output_md = None
+    if args.output_md:
+        output_md = Path(args.output_md)
+        output_md.parent.mkdir(parents=True, exist_ok=True)
+        _write_markdown(output_md, summary)
+    print(json.dumps({"output": str(output), "output_md": None if output_md is None else str(output_md), **summary}, indent=2))
 
 
 if __name__ == "__main__":

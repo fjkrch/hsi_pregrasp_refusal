@@ -4,11 +4,12 @@ import numpy as np
 import torch
 
 from hsi_pregrasp_refusal.calibration import calibrate_threshold
-from hsi_pregrasp_refusal.data import infer_feature_columns
+from hsi_pregrasp_refusal.data import infer_feature_columns, load_event_csv
 from hsi_pregrasp_refusal.features import (
     ALL_FEATURE_COLUMNS,
     FEATURE_GROUPS,
     LANGUAGE_FEATURE_COLUMNS,
+    VISUAL_PROXY_FEATURE_COLUMNS,
     language_feature_row,
     resolve_feature_columns,
 )
@@ -56,6 +57,7 @@ def test_calibration_picks_largest_valid_threshold():
 def test_feature_group_resolution_and_vla_csv_inference():
     assert resolve_feature_columns(feature_group="robot_state") == FEATURE_GROUPS["robot_state"]
     assert resolve_feature_columns(feature_group="visual_language") == FEATURE_GROUPS["visual_language"]
+    assert resolve_feature_columns(feature_group="visual_proxy_language") == FEATURE_GROUPS["visual_proxy_language"]
     rows = [{column: "0.1" for column in ALL_FEATURE_COLUMNS}]
     rows[0]["grasp_success"] = "1"
 
@@ -115,6 +117,48 @@ def test_estimated_geometry_proxy_uses_visual_summaries_only():
 
     assert scores.shape == (2,)
     assert scores[0] > scores[1]
+
+
+def test_load_event_csv_computes_visual_proxy_features(tmp_path):
+    path = tmp_path / "events.csv"
+    camera_columns = []
+    values = {}
+    for camera in ["camera1", "camera2", "camera3"]:
+        camera_columns.extend(
+            [
+                f"{camera}_rgb_mean",
+                f"{camera}_red_mean",
+                f"{camera}_green_mean",
+                f"{camera}_blue_mean",
+                f"{camera}_center_mean",
+                f"{camera}_center_std",
+                f"{camera}_edge_mean",
+            ]
+        )
+        values.update(
+            {
+                f"{camera}_rgb_mean": "0.50",
+                f"{camera}_red_mean": "0.80",
+                f"{camera}_green_mean": "0.20",
+                f"{camera}_blue_mean": "0.10",
+                f"{camera}_center_mean": "0.75",
+                f"{camera}_center_std": "0.30",
+                f"{camera}_edge_mean": "0.20",
+            }
+        )
+    path.write_text(
+        ",".join(["grasp_success", *camera_columns])
+        + "\n"
+        + ",".join(["1", *[values[column] for column in camera_columns]])
+        + "\n"
+    )
+
+    features, success, columns, _ = load_event_csv(path, feature_columns=list(VISUAL_PROXY_FEATURE_COLUMNS))
+
+    assert columns == VISUAL_PROXY_FEATURE_COLUMNS
+    assert success.tolist() == [True]
+    assert features.shape == (1, len(VISUAL_PROXY_FEATURE_COLUMNS))
+    assert features[0, columns.index("visual_proxy_evidence_score")] > 0.0
 
 
 def test_metrics_by_failure_type_splits_wrong_object_and_geometric_rows():

@@ -37,6 +37,18 @@ parser.add_argument("--open_width_threshold", type=float, default=0.04)
 parser.add_argument("--approach_noise_std", type=float, default=0.02)
 parser.add_argument("--approach_height_bias", type=float, default=0.0)
 parser.add_argument(
+    "--geometry_good_distance_threshold",
+    type=float,
+    default=0.04,
+    help="Pre-grasp distance threshold used only to annotate geometry-good failure types.",
+)
+parser.add_argument(
+    "--geometry_good_lateral_threshold",
+    type=float,
+    default=0.04,
+    help="Pre-grasp lateral-error threshold used only to annotate geometry-good failure types.",
+)
+parser.add_argument(
     "--variant",
     choices=[
         "single",
@@ -259,6 +271,7 @@ def main():
         "language_mode",
         "language_instruction",
         "language_target",
+        "geometry_good_pregrasp",
         "vla_samples",
         "vla_inference_ms",
         *ALL_FEATURE_COLUMNS,
@@ -266,6 +279,7 @@ def main():
         "close_accepted",
         "close_was_refused",
         "grasp_success",
+        "failure_type",
         "label_reason",
     ]
     pending: dict[int, dict[str, object]] = {}
@@ -360,6 +374,12 @@ def main():
                         summary = vla.sample_actions(images, vla_state, num_samples=args_cli.vla_samples)
                         vla_row = summary.feature_row()
                         vla_inference_ms = summary.inference_ms
+                    geometry_good = (
+                        tensor_item(feature_tensors["ee_object_distance"], env_id)
+                        <= args_cli.geometry_good_distance_threshold
+                        and tensor_item(feature_tensors["ee_object_lateral_error"], env_id)
+                        <= args_cli.geometry_good_lateral_threshold
+                    )
                     pending[env_id] = {
                         "event_id": next_event_id,
                         "env_id": env_id,
@@ -370,6 +390,7 @@ def main():
                         "language_mode": args_cli.language_mode,
                         "language_instruction": instruction,
                         "language_target": language_target,
+                        "geometry_good_pregrasp": int(geometry_good),
                         "vla_samples": 0 if vla is None else args_cli.vla_samples,
                         "vla_inference_ms": vla_inference_ms,
                         **_row_from_feature_tensors(feature_tensors, env_id),
@@ -394,9 +415,24 @@ def main():
                     default_cube_lifted = lifted >= args_cli.lift_height
                     target_is_default = row["language_target"] == "default"
                     row["grasp_success"] = int(default_cube_lifted and target_is_default)
+                    geometry_good = bool(int(row["geometry_good_pregrasp"]))
                     if not target_is_default and default_cube_lifted:
+                        row["failure_type"] = "wrong_object"
                         row["label_reason"] = "wrong_object_default_cube_lifted"
+                    elif not target_is_default and geometry_good:
+                        row["failure_type"] = "wrong_object"
+                        row["label_reason"] = "wrong_object_geometry_good_no_lift"
+                    elif row["grasp_success"]:
+                        row["failure_type"] = "success"
+                        row["label_reason"] = "done" if env_done else "horizon"
+                    elif args_cli.variant == "partial_occlusion" and geometry_good:
+                        row["failure_type"] = "partial_occlusion"
+                        row["label_reason"] = "partial_occlusion_geometry_good_failed"
+                    elif args_cli.variant == "clutter" and geometry_good:
+                        row["failure_type"] = "clutter"
+                        row["label_reason"] = "clutter_geometry_good_failed"
                     else:
+                        row["failure_type"] = "geometric_approach"
                         row["label_reason"] = "done" if env_done else "horizon"
                     row.pop("_target_step")
                     row.pop("_object_z_at_event")

@@ -37,6 +37,10 @@ Completed so far:
 - scaled language-conditioned wrong-object camera dataset: `600` train events plus `400` holdout events
 - matched-acceptance wrong-object CI table, proxy-geometry table, and online wrong-object refusal/reapproach evaluation
 - small language wrong-object camera+SmolVLA subset with nonzero action-uncertainty features
+- CSV-only learned visual-proxy feature path computed from stored camera summary columns, with wrong-object matched-CI
+  and failure-type tables
+- fresh camera-enabled physical wrong-object and partial-occlusion debug runs now exercise `geometry_good_pregrasp` and
+  `failure_type` labels on real IsaacLab observations
 
 Latest state-only holdout result summary:
 
@@ -116,6 +120,8 @@ Latest camera-enabled VLA-sim datasets:
 | Language wrong-object scaled train | `600` | `280` | `320` | `0.5333` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_main600_camera_events.csv` |
 | Language wrong-object scaled holdout | `400` | `195` | `205` | `0.5125` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv` |
 | Language wrong-object VLA subset | `40` | `22` | `18` | `0.4500` | `2` | `334.6038` | `logs/hsi_pregrasp/vla/language_wrong_object_vla40_events.csv` |
+| Physical wrong-object debug | `100` | `37` | `63` | `0.6300` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/physical_wrong_object_debug100_events.csv` |
+| Physical partial-occlusion debug | `100` | `75` | `25` | `0.2500` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/physical_partial_occlusion_debug100_events.csv` |
 | Partial-occlusion robustness | `100` | `82` | `18` | `0.1800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_partial_occlusion100_events.csv` |
 | Clutter robustness | `100` | `70` | `30` | `0.3000` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_clutter100_events.csv` |
 | Lighting robustness | `100` | `72` | `28` | `0.2800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_lighting100_full_events.csv` |
@@ -146,8 +152,9 @@ Current headline language-conditioned wrong-object result:
 | Result | Method | Oracle Geometry? | False-Accept Risk | Wrong-Object FAR | Acceptance | Note |
 | --- | --- | --- | ---: | ---: | ---: | --- |
 | Offline holdout400 | `visual_language` | `no` | `0.0900` | `0.0000` | `0.5000` | fair camera+language result |
+| Offline holdout400 | `visual_proxy_language` | `no` | `0.1700` | `0.0000` | `0.5000` | CSV-only learned proxy from camera summaries |
 | Offline holdout400 | `distance_only` | `yes` | `0.3700` | `0.3700` | `0.5000` | true simulator geometry baseline |
-| Offline holdout400 | `estimated_geometry_proxy` | `no` | `0.4650` | `0.3350` | `0.5000` | image-summary geometry proxy |
+| Offline holdout400 | `estimated_geometry_proxy` | `no` | `0.4800` | `0.3650` | `0.5000` | image-summary geometry proxy |
 | Online | Always Close | `no` | `0.4795` | `0.2877` | `1.0000` | accepted `21` wrong-object closes |
 | Online | Visual+Language Refusal | `no` | `0.1154` | `0.0000` | `0.4444` | accepted `0` wrong-object closes |
 | Online | Full Language Refusal | `yes` | `0.0444` | `0.0000` | `0.3516` | oracle-assisted upper bound |
@@ -171,8 +178,10 @@ Current VLA-sim conclusion: proposal-scale simulation is complete for the main s
 language-conditioned wrong-object benchmark is now complete at `600` train / `400` holdout. Visual features are the best
 learned group on the single-object holdout, but oracle distance is still slightly stronger there. In the wrong-object
 benchmark, no-oracle `visual_language` beats distance and robot-state geometry at matched acceptance, with `0.0000`
-wrong-object false accepts on the `400`-event holdout. Sampled SmolVLA action uncertainty alone is weak. Lighting shift
-still exposes a robustness gap because camera-heavy checkpoints over-refuse.
+wrong-object false accepts on the `400`-event holdout. The cheaper CSV-only `visual_proxy_language` checkpoint also
+beats the oracle geometry baselines at matched acceptance (`0.1700` FAR vs `0.3700-0.3900`) while accepting zero
+wrong-object closes, but it is weaker than the full camera-summary `visual_language` head. Sampled SmolVLA action
+uncertainty alone is weak. Lighting shift still exposes a robustness gap because camera-heavy checkpoints over-refuse.
 
 Latest simulation-only proxy baselines can be regenerated without launching IsaacLab:
 
@@ -189,13 +198,66 @@ Latest proxy result at the same `0.50` acceptance used by the scaled wrong-objec
 | Dataset | Method | Oracle geometry? | FAR | Accepted success | Wrong-object FAR |
 | --- | --- | --- | ---: | ---: | ---: |
 | `language_wrong_object_holdout400_camera` | `always_close` | `no` | `0.5125` | `0.4875` | `0.3600` |
-| `language_wrong_object_holdout400_camera` | `estimated_geometry_proxy` | `no` | `0.4650` | `0.5350` | `0.3350` |
+| `language_wrong_object_holdout400_camera` | `estimated_geometry_proxy` | `no` | `0.4800` | `0.5200` | `0.3650` |
 | `language_wrong_object_holdout400_camera` | `oracle_geometry_upper_bound` | `yes` | `0.3900` | `0.6100` | `0.3900` |
+
+Latest CSV-only learned visual-proxy ablation, regenerated on `2026-05-23` from existing camera-summary CSVs without
+launching IsaacLab:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_feature_group_ablation.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_main600_camera_events.csv \
+  --eval-input logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_visual_proxy_ablation_main600.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_visual_proxy_ablation_main600.md \
+  --checkpoint-dir logs/hsi_pregrasp/vla/checkpoints_language_visual_proxy_main600 \
+  --feature-groups language,visual_proxy,visual_proxy_language,visual_language \
+  --epochs 300 \
+  --seed 42 \
+  --device cpu
+```
+
+| Feature Group | Oracle Geometry? | False-Accept Risk | Accepted Success | Acceptance Rate |
+| --- | --- | ---: | ---: | ---: |
+| `language` | `no` | `n/a` | `n/a` | `0.0000` |
+| `visual_proxy` | `no` | `0.0000` | `1.0000` | `0.0075` |
+| `visual_proxy_language` | `no` | `0.1310` | `0.8690` | `0.3625` |
+| `visual_language` | `no` | `0.0900` | `0.9100` | `0.5000` |
+
+Matched-acceptance CI for the same run, using `visual_language` acceptance (`0.5000`) as the target:
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_matched_acceptance_ci.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_holdout400_camera_events.csv \
+  --title "Wrong-Object Visual Proxy Matched-Acceptance CI" \
+  --reference-checkpoint visual_language=logs/hsi_pregrasp/vla/checkpoints_language_camera_main600/visual_language_refusal_head.pt \
+  --checkpoint visual_proxy_language=logs/hsi_pregrasp/vla/checkpoints_language_visual_proxy_main600/visual_proxy_language_refusal_head.pt \
+  --scalar distance_only=ee_object_distance:low \
+  --scalar lateral_error_only=ee_object_lateral_error:low \
+  --proxy estimated_geometry_proxy=estimated_geometry_proxy \
+  --proxy oracle_geometry_proxy=oracle_geometry_proxy \
+  --include-always-close \
+  --include-matched-random \
+  --bootstrap 2000 \
+  --seed 42 \
+  --device cpu \
+  --output-json logs/hsi_pregrasp/vla/language_wrong_object_visual_proxy_matched_ci.json \
+  --output-md logs/hsi_pregrasp/vla/language_wrong_object_visual_proxy_matched_ci.md
+```
+
+| Method | Oracle Geometry? | FAR, 95% CI | Accepted Success, 95% CI | Wrong-Object FAR, 95% CI | Acceptance |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `visual_language` | `no` | `0.0900` [`0.0512`, `0.1312`] | `0.9100` [`0.8676`, `0.9482`] | `0.0000` [`0.0000`, `0.0000`] | `0.5000` |
+| `visual_proxy_language` | `no` | `0.1700` [`0.1173`, `0.2217`] | `0.8300` [`0.7761`, `0.8812`] | `0.0000` [`0.0000`, `0.0000`] | `0.5000` |
+| `distance_only` | `yes` | `0.3700` [`0.3053`, `0.4385`] | `0.6300` [`0.5619`, `0.6961`] | `0.3700` [`0.3073`, `0.4412`] | `0.5000` |
+| `lateral_error_only` | `yes` | `0.3750` [`0.3088`, `0.4427`] | `0.6250` [`0.5591`, `0.6932`] | `0.3750` [`0.3052`, `0.4410`] | `0.5000` |
+| `oracle_geometry_proxy` | `yes` | `0.3900` [`0.3220`, `0.4585`] | `0.6100` [`0.5428`, `0.6766`] | `0.3900` [`0.3184`, `0.4590`] | `0.5000` |
 
 ## Result Source Audit
 
-Checked on `2026-05-22`: the headline result tables above were compared against the local CSV/JSON artifacts below.
-The only README correction found in this pass was the distractor smoke mean VLA time, now `198.2385 ms/event`.
+Checked on `2026-05-22` and updated on `2026-05-23`: the headline result tables above were compared against the
+local CSV/JSON artifacts below. The `2026-05-23` update added the CSV-only visual-proxy artifacts and regenerated the
+image-summary proxy-geometry table with the current proxy scorer.
 
 | Result Family | Source Artifact | Checked Value |
 | --- | --- | --- |
@@ -209,10 +271,14 @@ The only README correction found in this pass was the distractor smoke mean VLA 
 | Language wrong-object scaled train | `language_wrong_object_main600_camera_events.csv` | events `600`; success `280`; failure `320`; VLA skipped |
 | Language wrong-object scaled holdout | `language_wrong_object_holdout400_camera_events.csv` | events `400`; success `195`; failure `205`; VLA skipped |
 | Language wrong-object VLA subset | `language_wrong_object_vla40_events.csv` | events `40`; success `22`; failure `18`; mean VLA `334.6038 ms` |
+| Physical wrong-object debug | `physical_wrong_object_debug100_events.csv` | events `100`; success `37`; failure `63`; geometry-good failures `52` |
+| Physical partial-occlusion debug | `physical_partial_occlusion_debug100_events.csv` | events `100`; success `75`; failure `25`; geometry-good failures `8` |
 | Single-object VLA feature groups | `feature_group_ablations_main600.json` | visual FAR `0.1104`; robot_visual FAR `0.1351` |
 | Single-object no-oracle CI | `no_oracle_holdout400_matched_ci.json` | visual FAR `0.1104`; matched-random FAR `0.2799` |
 | Scaled wrong-object CI | `language_wrong_object_camera_main600_matched_ci.json` | visual_language FAR `0.0900`; distance FAR `0.3700`; visual wrong-object FAR `0.0000` |
-| Scaled wrong-object proxy geometry | `language_wrong_object_camera_main600_proxy_baselines.json` | proxy FAR `0.4650`; oracle FAR `0.3900` |
+| Scaled wrong-object visual proxy ablation | `language_wrong_object_visual_proxy_ablation_main600.json` | visual_proxy_language FAR `0.1310`; acceptance `0.3625` |
+| Scaled wrong-object visual proxy CI | `language_wrong_object_visual_proxy_matched_ci.json` | visual_proxy_language FAR `0.1700`; wrong-object FAR `0.0000`; distance FAR `0.3700` |
+| Scaled wrong-object proxy geometry | `language_wrong_object_camera_main600_proxy_baselines.json` | proxy FAR `0.4800`; oracle FAR `0.3900` |
 | Online wrong-object always-close | `online_language_wrong_object_main600_always_close_summary.json` | FAR `0.4795`; wrong accepted `21`; acceptance `1.0000`; episodes `112` |
 | Online wrong-object visual_language | `online_language_wrong_object_main600_visual_language_summary.json` | FAR `0.1154`; wrong accepted `0`; acceptance `0.4444`; episodes `112` |
 | Online wrong-object full_language | `online_language_wrong_object_main600_full_language_summary.json` | FAR `0.0444`; wrong accepted `0`; acceptance `0.3516`; episodes `112` |
@@ -239,7 +305,7 @@ In this simulator scaffold, the first signal set is:
 ## Project Structure
 
 - `hsi_pregrasp_refusal/trigger.py`: deterministic pre-grasp trigger
-- `hsi_pregrasp_refusal/features.py`: feature columns used by the collector and model
+- `hsi_pregrasp_refusal/features.py`: raw and CSV-computed feature columns used by the collector and model
 - `hsi_pregrasp_refusal/model.py`: small MLP refusal head predicting `p(close will fail)`
 - `hsi_pregrasp_refusal/calibration.py`: threshold calibration for target false-accept risk
 - `hsi_pregrasp_refusal/metrics.py`: selective close/refuse metrics
@@ -249,11 +315,11 @@ In this simulator scaffold, the first signal set is:
 - `hsi_pregrasp_refusal/isaaclab_vla_scene.py`: camera-enabled lift scene and simulator variants
 - `hsi_pregrasp_refusal/state_machine.py`: shared Franka lift state machine
 - `scripts/collect_lift_cube_pregrasp.py`: IsaacLab data collector
-- `scripts/collect_vla_lift_pregrasp.py`: camera/VLA IsaacLab event collector
+- `scripts/collect_vla_lift_pregrasp.py`: camera/VLA IsaacLab event collector with wrong-object, clutter, and occlusion labels
 - `scripts/train_refusal_head.py`: train/calibrate refusal head
 - `scripts/evaluate_refusal.py`: evaluate a trained checkpoint
 - `scripts/run_offline_baselines.py`: scalar and matched-random offline baselines
-- `scripts/run_matched_acceptance_ci.py`: matched-acceptance comparisons with bootstrap confidence intervals
+- `scripts/run_matched_acceptance_ci.py`: matched-acceptance comparisons with bootstrap confidence intervals and failure-type splits
 - `scripts/run_simulation_proxy_baselines.py`: always-close, image-summary estimated-geometry proxy, and oracle-geometry upper bound
 - `scripts/run_online_vla_refusal_eval.py`: camera/VLA online refusal and reapproach evaluation
 - `scripts/run_feature_group_ablation.py`: train/evaluate feature-group heads
@@ -1246,7 +1312,7 @@ Proxy geometry result at matched `0.50` acceptance:
 | Method | Oracle Geometry? | False-Accept Risk | Accepted Success | Wrong-Object FAR | Acceptance |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `always_close` | `no` | `0.5125` | `0.4875` | `0.3600` | `1.0000` |
-| `estimated_geometry_proxy` | `no` | `0.4650` | `0.5350` | `0.3350` | `0.5000` |
+| `estimated_geometry_proxy` | `no` | `0.4800` | `0.5200` | `0.3650` | `0.5000` |
 | `oracle_geometry_upper_bound` | `yes` | `0.3900` | `0.6100` | `0.3900` | `0.5000` |
 
 Interpretation: this is the clean simulator win the proposal needed. At matched acceptance, no-oracle
@@ -1503,11 +1569,20 @@ Physical wrong-object / stronger non-geometric variant status:
 
 - Code support was added for `--variant wrong_object`, which places one distractor close to the target grasp corridor
   plus additional clutter.
-- Two pilot collections were attempted with `80-120` requested events and `--skip_vla`, but they stalled after only
-  `6-8` usable events because the occluder often blocked the state machine before a close event could be labeled.
-- Those partial CSVs were deleted and are not used in any result table.
-- This physical occlusion/wrong-object variant still has a geometry-oracle gap: clutter and partial occlusion are useful
-  robustness checks, but they do not yet create enough aligned-but-failed physical wrong-object events.
+- Earlier `80-120` event attempts stalled after only `6-8` usable events because the occluder often blocked the state
+  machine before a close event could be labeled. Those partial CSVs were deleted and are not used in any result table.
+- The collector now writes `geometry_good_pregrasp` and `failure_type` for future camera/VLA collections. The annotation
+  threshold is `0.04 m` for both distance and lateral error, which matched the fresh physical debug runs below.
+- Fresh headless camera-enabled `100`-event debug runs on `2026-05-23` produced labelable close events:
+
+| Debug run | Events | Successes | Failures | Geometry-good pregrasps | Geometry-good failures | Failure-type mix |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `physical_wrong_object_debug100_events.csv` | `100` | `37` | `63` | `89` | `52` | `37` success, `43` wrong-object, `20` geometric |
+| `physical_partial_occlusion_debug100_events.csv` | `100` | `75` | `25` | `83` | `8` | `75` success, `8` partial-occlusion, `17` geometric |
+
+- This means the physical wrong-object/occlusion generator is no longer just wired; it has been smoke-tested with real
+  camera observations and produces some geometry-good failures. It is still a debug-scale result, not a final-scale
+  benchmark.
 - This does not contradict the scaled language wrong-object result above. The language benchmark creates target-conditioned
   failures where geometry is near the wrong object and the no-oracle `visual_language` head beats distance and robot-state
   geometry at matched acceptance.
@@ -1745,7 +1820,8 @@ Completed in this scaffold:
 
 Not yet completed:
 
-- learned visual embeddings or RGB-D features
+- stronger learned visual embeddings or RGB-D features; the current added path is a learned CSV-only visual proxy from
+  camera summary statistics, not DINO/CLIP/RGB-D
 - target-aware multi-object controller that can actually choose and lift the requested colored cube
 - final-scale VLA-uncertainty wrong-object dataset; a `40`-event subset exists, but not a full `600/400` VLA-sampled run
 - true VLA gripper-close probability; unavailable in the current 6-D SmolVLA action interface
@@ -1770,7 +1846,7 @@ Estimated remaining time:
 
 | Work | Estimated Time |
 | --- | ---: |
-| Tune physical wrong-object/occlusion condition and collect enough failures | `0.5-1.5 days` |
+| Scale physical wrong-object/occlusion debug from 100-event to 300/200-event datasets | `0.5-1 day` |
 | Add target-aware multi-object controller for colored-cube lift | `1-3 days` |
 | Add learned visual embeddings or RGB-D features | `1-3 days` |
 | Full VLA-uncertainty wrong-object `600/400` collection | `1-3 days` |
@@ -1785,13 +1861,14 @@ Practical total estimate:
 
 - Simulator-only version: complete for the implemented single-object, robustness, and language wrong-object benchmarks
 - VLA-in-simulation version: mostly complete for the implemented simulator variants; about `1-3 working days` remain for
-  stronger learned vision, full-scale VLA-uncertainty wrong-object runs, and final threshold protocol polish
+  final-scale physical wrong-object/occlusion datasets, stronger learned vision, full-scale VLA-uncertainty wrong-object
+  runs, and final threshold protocol polish
 - Full proposal with real robot data and paper-ready figures: about `3-5 weeks`
 
 ## Next Steps
 
-1. Tune the physical `wrong_object` / occlusion simulator so it produces enough close events where distance is good but
-   the target lift still fails.
+1. Scale the now-working physical `wrong_object` / partial-occlusion debug runs from `100` events to `300/200` if the
+   geometry-good failure mix holds.
 2. Add a target-aware multi-object controller that can actually choose and lift the requested colored cube.
 3. Add learned visual embeddings or RGB-D features if camera summary features remain too brittle.
 4. If needed for the paper, scale the `vla40` wrong-object uncertainty subset to a full `600/400` VLA-sampled run.

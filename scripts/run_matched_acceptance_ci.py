@@ -18,20 +18,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from hsi_pregrasp_refusal.data import load_event_csv  # noqa: E402
 from hsi_pregrasp_refusal.metrics import compute_refusal_metrics  # noqa: E402
 from hsi_pregrasp_refusal.model import RefusalHead  # noqa: E402
-
-
-ORACLE_GEOMETRY_COLUMNS = {
-    "ee_object_distance",
-    "ee_object_lateral_error",
-    "ee_object_height_error",
-    "object_height",
-    "gripper_width",
-    "action_delta_pos_norm",
-    "action_delta_rot_distance",
-    "close_commanded",
-    "sm_state",
-    "sm_wait_time",
-}
+from hsi_pregrasp_refusal.sim_analysis import (  # noqa: E402
+    ORACLE_GEOMETRY_COLUMNS,
+    estimated_geometry_proxy_scores,
+    metrics_by_failure_type,
+    oracle_geometry_scores,
+    wrong_object_mask,
+)
 
 
 def _load_checkpoint(path: str | Path, device: torch.device) -> dict:
@@ -83,6 +76,16 @@ def _parse_scalar(value: str) -> tuple[str, str, str]:
     return name, column, direction
 
 
+def _parse_proxy(value: str) -> tuple[str, str]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("Expected NAME=estimated_geometry_proxy or NAME=oracle_geometry_proxy.")
+    name, proxy = value.split("=", 1)
+    valid = {"estimated_geometry_proxy", "oracle_geometry_proxy"}
+    if not name or proxy not in valid:
+        raise argparse.ArgumentTypeError(f"Expected non-empty NAME and proxy in {sorted(valid)}.")
+    return name, proxy
+
+
 def _accepted_by_rate(scores: np.ndarray, acceptance_rate: float, *, low_is_safe: bool) -> tuple[np.ndarray, float | None]:
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
     total = scores.shape[0]
@@ -95,15 +98,6 @@ def _accepted_by_rate(scores: np.ndarray, acceptance_rate: float, *, low_is_safe
     accepted[order[:accepted_count]] = True
     threshold_idx = order[accepted_count - 1]
     return accepted, float(scores[threshold_idx])
-
-
-def _wrong_object_mask(rows: list[dict[str, str]]) -> np.ndarray:
-    """Return rows where accepting a close violates a non-default language target."""
-    mask = []
-    for row in rows:
-        target = row.get("language_target", "")
-        mask.append(bool(target and target != "default"))
-    return np.asarray(mask, dtype=bool)
 
 
 def _metrics_from_mask(accepted: np.ndarray, success: np.ndarray, wrong_object: np.ndarray | None = None) -> dict:
@@ -165,16 +159,20 @@ def _summarize(
     accepted: np.ndarray,
     success: np.ndarray,
     wrong_object: np.ndarray,
+    rows: list[dict[str, str]],
     bootstrap: int,
     rng: np.random.Generator,
     acceptance_mode: str,
     threshold: float | None = None,
     columns: list[str] | None = None,
+    uses_oracle_geometry: bool | None = None,
     random_acceptance_rate: float | None = None,
 ) -> dict:
     metrics = _metrics_from_mask(accepted, success, wrong_object)
     columns = [] if columns is None else columns
-    uses_oracle = bool(set(columns) & ORACLE_GEOMETRY_COLUMNS)
+    uses_oracle = bool(set(columns) & set(ORACLE_GEOMETRY_COLUMNS))
+    if uses_oracle_geometry is not None:
+        uses_oracle = uses_oracle_geometry
     result = {
         "name": name,
         "kind": kind,
@@ -183,6 +181,7 @@ def _summarize(
         "uses_oracle_geometry": uses_oracle,
         "feature_columns": columns,
         "metrics": metrics,
+        "failure_type_metrics": metrics_by_failure_type(accepted, success, rows, wrong_object),
         "ci95": {},
     }
     for metric in ["false_accept_risk", "accepted_success", "acceptance_rate", "wrong_object_false_accept_rate"]:
@@ -203,6 +202,7 @@ def _summarize_matched_random(
     *,
     success: np.ndarray,
     wrong_object: np.ndarray,
+    rows: list[dict[str, str]],
     acceptance_rate: float,
     repeats: int,
     rng: np.random.Generator,
@@ -217,11 +217,19 @@ def _summarize_matched_random(
     failed_counts: list[int] = []
     success_counts: list[int] = []
     wrong_object_counts: list[int] = []
+    failure_type_values: dict[str, dict[str, list[float]]] = {}
     for _ in range(max(1, repeats)):
         accepted = np.zeros(total, dtype=bool)
         if accepted_count > 0:
             accepted[rng.choice(total, size=accepted_count, replace=False)] = True
         metrics = _metrics_from_mask(accepted, success, wrong_object)
+        for failure_name, failure_metrics in metrics_by_failure_type(accepted, success, rows, wrong_object).items():
+            metric_values = failure_type_values.setdefault(failure_name, {})
+            for key, value in failure_metrics.items():
+                if value is None:
+                    metric_values.setdefault(key, []).append(float("nan"))
+                else:
+                    metric_values.setdefault(key, []).append(float(value))
         false_accept_values.append(float("nan") if metrics["false_accept_risk"] is None else metrics["false_accept_risk"])
         accepted_success_values.append(
             float("nan") if metrics["accepted_success"] is None else metrics["accepted_success"]
@@ -241,6 +249,16 @@ def _summarize_matched_random(
     failed_accepted = float(np.mean(failed_counts)) if accepted_count else 0.0
     successful_accepted = float(np.mean(success_counts)) if accepted_count else 0.0
     wrong_object_accepted = float(np.mean(wrong_object_counts)) if accepted_count else 0.0
+    failure_type_metrics = {}
+    for failure_name, metric_values in failure_type_values.items():
+        failure_type_metrics[failure_name] = {}
+        for key, values in metric_values.items():
+            array = np.asarray(values, dtype=np.float64)
+            if np.all(np.isnan(array)):
+                failure_type_metrics[failure_name][key] = None
+            else:
+                value = float(np.nanmean(array))
+                failure_type_metrics[failure_name][key] = int(round(value)) if key == "total_events" else value
     return {
         "name": "matched_random",
         "kind": "baseline",
@@ -272,6 +290,7 @@ def _summarize_matched_random(
                 float(accepted_count / total) if total else 0.0,
             ],
         },
+        "failure_type_metrics": failure_type_metrics,
     }
 
 
@@ -295,6 +314,14 @@ def _format_count(value: float | int) -> str:
     if isinstance(value, float) and not value.is_integer():
         return f"{value:.1f}"
     return str(int(value))
+
+
+def _format_value(value: float | int | None) -> str:
+    if value is None:
+        return "`n/a`"
+    if isinstance(value, float):
+        return f"`{value:.4f}`"
+    return f"`{value}`"
 
 
 def _write_markdown(path: Path, summary: dict) -> None:
@@ -337,6 +364,33 @@ def _write_markdown(path: Path, summary: dict) -> None:
             )
             + " |"
         )
+    lines.extend(
+        [
+            "",
+            "## Failure-Type Splits",
+            "",
+            "| Method | Failure type | Events | Accepted | FAR | Accepted success | Wrong-object FAR | Acceptance |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in summary["results"]:
+        for failure_name, metrics in result.get("failure_type_metrics", {}).items():
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{result['name']}`",
+                        f"`{failure_name}`",
+                        _format_value(metrics["total_events"]),
+                        _format_value(metrics["accepted_closures"]),
+                        _format_value(metrics["false_accept_risk"]),
+                        _format_value(metrics["accepted_success"]),
+                        _format_value(metrics["wrong_object_false_accept_rate"]),
+                        _format_value(metrics["acceptance_rate"]),
+                    ]
+                )
+                + " |"
+            )
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -364,6 +418,16 @@ def main() -> None:
         default=[],
         help="Scalar baseline scored at the target acceptance, as NAME=COLUMN:low or NAME=COLUMN:high.",
     )
+    parser.add_argument(
+        "--proxy",
+        type=_parse_proxy,
+        action="append",
+        default=[],
+        help=(
+            "CSV-only proxy baseline scored at target acceptance. Supported specs: "
+            "NAME=estimated_geometry_proxy or NAME=oracle_geometry_proxy."
+        ),
+    )
     parser.add_argument("--include-always-close", action="store_true", help="Include unselective always-close row.")
     parser.add_argument("--include-matched-random", action="store_true", help="Include matched random row.")
     parser.add_argument("--bootstrap", type=int, default=2000)
@@ -375,7 +439,7 @@ def main() -> None:
 
     _, success, _, rows = load_event_csv(args.input, feature_columns=[])
     success = success.astype(bool)
-    wrong_object = _wrong_object_mask(rows)
+    wrong_object = wrong_object_mask(rows)
     device = torch.device(args.device)
     rng = np.random.default_rng(args.seed)
 
@@ -391,6 +455,7 @@ def main() -> None:
             accepted=reference_accepted,
             success=success,
             wrong_object=wrong_object,
+            rows=rows,
             bootstrap=args.bootstrap,
             rng=rng,
             acceptance_mode="checkpoint threshold",
@@ -407,6 +472,7 @@ def main() -> None:
                 accepted=np.ones_like(success, dtype=bool),
                 success=success,
                 wrong_object=wrong_object,
+                rows=rows,
                 bootstrap=args.bootstrap,
                 rng=rng,
                 acceptance_mode="accept all",
@@ -418,6 +484,7 @@ def main() -> None:
             _summarize_matched_random(
                 success=success,
                 wrong_object=wrong_object,
+                rows=rows,
                 acceptance_rate=target_acceptance,
                 repeats=args.bootstrap,
                 rng=rng,
@@ -434,6 +501,7 @@ def main() -> None:
                 accepted=accepted,
                 success=success,
                 wrong_object=wrong_object,
+                rows=rows,
                 bootstrap=args.bootstrap,
                 rng=rng,
                 acceptance_mode="matched target acceptance",
@@ -455,11 +523,41 @@ def main() -> None:
                 accepted=accepted,
                 success=success,
                 wrong_object=wrong_object,
+                rows=rows,
                 bootstrap=args.bootstrap,
                 rng=rng,
                 acceptance_mode="matched target acceptance",
                 threshold=threshold,
                 columns=[column],
+            )
+        )
+
+    for name, proxy in args.proxy:
+        if proxy == "estimated_geometry_proxy":
+            scores = estimated_geometry_proxy_scores(rows)
+            kind = "proxy:image_summary_geometry"
+            uses_oracle = False
+            columns = []
+        else:
+            scores = oracle_geometry_scores(rows)
+            kind = "proxy:oracle_geometry"
+            uses_oracle = True
+            columns = list(ORACLE_GEOMETRY_COLUMNS)
+        accepted, threshold = _accepted_by_rate(scores, target_acceptance, low_is_safe=True)
+        results.append(
+            _summarize(
+                name=name,
+                kind=kind,
+                accepted=accepted,
+                success=success,
+                wrong_object=wrong_object,
+                rows=rows,
+                bootstrap=args.bootstrap,
+                rng=rng,
+                acceptance_mode="matched target acceptance",
+                threshold=threshold,
+                columns=columns,
+                uses_oracle_geometry=uses_oracle,
             )
         )
 

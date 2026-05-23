@@ -27,9 +27,10 @@ def _save(fig, path: Path):
 
 def plot_feature_groups(vla_dir: Path, output_dir: Path) -> Path:
     data = _load_json(vla_dir / "feature_group_ablations_main600.json")
-    groups = list(data)
-    false_accept = [_metric(data[group]["eval"]["metrics"]["false_accept_risk"]) for group in groups]
-    acceptance = [_metric(data[group]["eval"]["metrics"]["acceptance_rate"]) for group in groups]
+    results = data.get("results", data)
+    groups = list(results)
+    false_accept = [_metric(results[group]["eval"]["metrics"]["false_accept_risk"]) for group in groups]
+    acceptance = [_metric(results[group]["eval"]["metrics"]["acceptance_rate"]) for group in groups]
 
     x = np.arange(len(groups))
     width = 0.38
