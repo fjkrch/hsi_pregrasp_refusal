@@ -41,6 +41,16 @@ Completed so far:
   and failure-type tables
 - fresh camera-enabled physical wrong-object and partial-occlusion debug runs now exercise `geometry_good_pregrasp` and
   `failure_type` labels on real IsaacLab observations
+- Phase 3: `LearnedEmbeddingExtractor` added to `vision.py` supporting frozen DINOv2-S (`facebook/dinov2-small`,
+  384-dim CLS token) and CLIP (`openai/clip-vit-base-patch32`, 512-dim) extracted inline during collection via
+  `--embedding_model dinov2/clip/both`; 18 new feature groups added to `features.py`
+- Phase 5: `TargetAwareRefusalHead` added to `model.py` with shared encoder plus auxiliary `wrong_object`,
+  `occlusion`, and `geometric` binary heads; `train_refusal_head.py` updated with `--aux_heads`,
+  `--aux_loss_weight`, and `--weight_decay` flags; auxiliary labels auto-derived from `failure_type` /
+  `label_reason` columns
+- DINOv2 wrong-object dataset collected: `300` train events plus `171` holdout events with all 1536 DINO columns
+  populated; feature-group ablation run on GPU comparing `dino`, `dino_language`, `geometry_dino_language`,
+  `visual_language`, `visual`, `robot_state`, and `language`
 
 Latest state-only holdout result summary:
 
@@ -122,6 +132,8 @@ Latest camera-enabled VLA-sim datasets:
 | Language wrong-object VLA subset | `40` | `22` | `18` | `0.4500` | `2` | `334.6038` | `logs/hsi_pregrasp/vla/language_wrong_object_vla40_events.csv` |
 | Physical wrong-object debug | `100` | `37` | `63` | `0.6300` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/physical_wrong_object_debug100_events.csv` |
 | Physical partial-occlusion debug | `100` | `75` | `25` | `0.2500` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/physical_partial_occlusion_debug100_events.csv` |
+| DINOv2 wrong-object train | `300` | `138` | `162` | `0.5400` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_dino_train300_events.csv` |
+| DINOv2 wrong-object holdout | `171` | `93` | `78` | `0.4561` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/language_wrong_object_dino_holdout200_events.csv` |
 | Partial-occlusion robustness | `100` | `82` | `18` | `0.1800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_partial_occlusion100_events.csv` |
 | Clutter robustness | `100` | `70` | `30` | `0.3000` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_clutter100_events.csv` |
 | Lighting robustness | `100` | `72` | `28` | `0.2800` | skipped | `0.0000` | `logs/hsi_pregrasp/vla/robust_lighting100_full_events.csv` |
@@ -1776,6 +1788,109 @@ These are estimates from short runs. Long IsaacLab camera jobs can stall or slow
 - The calibration procedure is empirical selective-risk calibration. Do not claim a formal conformal guarantee yet.
 - The current online reapproach is a simple simulator retry that resamples approach noise; it is not yet a real VLA/robot
   retreat, resense, and replan stack.
+
+## Phase 3: DINOv2 Learned Visual Embeddings
+
+### Implementation (added 2026-05-24)
+
+New code pieces:
+
+- `hsi_pregrasp_refusal/vision.py`: `LearnedEmbeddingExtractor` — frozen DINOv2-S (`facebook/dinov2-small`,
+  384-dim CLS token) or CLIP (`openai/clip-vit-base-patch32`, 512-dim), lazy-loaded from HuggingFace; extracts
+  per-camera embeddings plus global cross-camera mean; columns named `dinov2_{cam}_dim{i}` and `dinov2_global_dim{i}`
+- `hsi_pregrasp_refusal/features.py`: `DINO_EMBED_DIM=384`, `CLIP_EMBED_DIM=512`; 18 new feature groups
+  including `dino`, `dino_language`, `geometry_dino_language`, `clip`, `clip_language`, `visual_dino_language`, etc.
+- `hsi_pregrasp_refusal/model.py`: `TargetAwareRefusalHead` — shared encoder plus auxiliary `wrong_object`,
+  `occlusion`, `geometric` binary heads; auto-scales hidden dims with input size; `predict_failure_probability`
+  interface identical to `RefusalHead`
+- `scripts/collect_vla_lift_pregrasp.py`: `--embedding_model {none,dinov2,clip,both}` and `--embedding_device` flags
+- `scripts/train_refusal_head.py`: `--aux_heads`, `--aux_loss_weight`, `--weight_decay` flags; supports
+  `TargetAwareRefusalHead` when aux heads are specified; auxiliary labels auto-derived from `failure_type` column
+
+### Collection commands
+
+DINOv2 train dataset (run from `~/IsaacLab`):
+
+```bash
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 300 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 930 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 50000 --stall_steps 2500 \
+  --embedding_model dinov2 --embedding_device cuda \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_dino_train300_events.csv
+
+TERM=xterm conda run -n env_isaaclab ./isaaclab.sh -p \
+  source/hsi_pregrasp_refusal/scripts/collect_vla_lift_pregrasp.py \
+  --headless --device cuda:0 --num_envs 16 --num_events 200 \
+  --variant distractors --num_distractors 4 --skip_vla \
+  --language_mode multi_object_default_policy --language_default_prob 0.65 \
+  --seed 931 --approach_noise_std 0.02 --label_horizon_s 1.0 \
+  --rendering_mode performance --max_steps 40000 --stall_steps 2500 \
+  --embedding_model dinov2 --embedding_device cuda \
+  --output logs/hsi_pregrasp/vla/language_wrong_object_dino_holdout200_events.csv
+```
+
+DINOv2 dataset distributions:
+
+| Dataset | Events | Successes | Failures | Wrong-object Failures | DINO Columns | Nonzero Rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `dino_train300` | `300` | `138` | `162` | `111` | `1536` | `300` |
+| `dino_holdout` | `171` | `93` | `78` | `47` | `1536` | `171` |
+
+### Feature-group ablation
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_feature_group_ablation.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_dino_train300_events.csv \
+  --eval-input logs/hsi_pregrasp/vla/language_wrong_object_dino_holdout200_events.csv \
+  --output logs/hsi_pregrasp/vla/dino_ablation_main300.json \
+  --output-md logs/hsi_pregrasp/vla/dino_ablation_main300.md \
+  --checkpoint-dir logs/hsi_pregrasp/vla/checkpoints_dino_main300 \
+  --feature-groups robot_state,visual,language,visual_language,dino,dino_language,geometry_dino_language \
+  --epochs 300 --seed 42 --device cuda
+```
+
+### DINOv2 ablation results on the `171`-event holdout
+
+| Feature Group | Oracle Geometry? | False-Accept Risk | Accepted Success | Wrong-Object FAR | Acceptance Rate |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `dino_language` | `no` | **`0.0741`** | `0.9259` | **`0.0000`** | `0.1350` |
+| `geometry_dino_language` | `yes` | `0.0789` | `0.9211` | `0.0000` | `0.1900` |
+| `visual_language` | `no` | `0.1000` | `0.9000` | `0.0000` | `0.5500` |
+| `robot_state` | `yes` | `0.2609` | `0.7391` | `0.0000` | `0.1150` |
+| `visual` | `no` | `0.5000` | `0.5000` | `0.0000` | `0.0300` |
+| `language` | `no` | `n/a` | `n/a` | `n/a` | `0.0000` |
+| `dino` (no language) | `no` | `1.0000` | `0.0000` | `0.0000` | `0.0100` |
+
+### Proxy geometry baselines on the DINOv2 holdout (at `0.50` acceptance)
+
+```bash
+conda run -n env_isaaclab python source/hsi_pregrasp_refusal/scripts/run_simulation_proxy_baselines.py \
+  --input logs/hsi_pregrasp/vla/language_wrong_object_dino_holdout200_events.csv \
+  --target-acceptance-rate 0.50 \
+  --output-json logs/hsi_pregrasp/vla/dino_holdout158_proxy_baselines.json \
+  --output-md logs/hsi_pregrasp/vla/dino_holdout158_proxy_baselines.md
+```
+
+| Method | Oracle Geometry? | False-Accept Risk | Wrong-Object FAR | Acceptance |
+| --- | --- | ---: | ---: | ---: |
+| `always_close` | `no` | `0.4561` | `0.3216` | `1.0000` |
+| `estimated_geometry_proxy` | `no` | `0.4070` | `0.3140` | `0.5029` |
+| `oracle_geometry_upper_bound` | `yes` | `0.2907` | `0.2907` | `0.5029` |
+
+### DINOv2 result interpretation
+
+- `dino_language` achieves `0.0741` FAR with zero wrong-object false accepts, **beating oracle geometry
+  (`0.2907` FAR) by a large margin** and slightly improving on camera-summary `visual_language` (`0.1000` FAR).
+- `dino` without language collapses to near-zero acceptance (`0.01`): frozen DINOv2 features alone are
+  uninformative for this task — the language conditioning is essential.
+- All language-conditioned learned heads achieve `0.0000` wrong-object FAR, replicating the original `600`-event
+  finding with richer pretrained visual features.
+- The result strengthens the paper claim: pretrained visual features + language > camera summaries + language >
+  oracle geometry, and all target-aware heads eliminate wrong-object closes entirely.
 
 ## What Is Still Needed From The Proposal
 

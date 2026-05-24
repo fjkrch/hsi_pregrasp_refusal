@@ -17,7 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from hsi_pregrasp_refusal.data import load_event_csv  # noqa: E402
 from hsi_pregrasp_refusal.metrics import compute_refusal_metrics  # noqa: E402
-from hsi_pregrasp_refusal.model import RefusalHead  # noqa: E402
+from hsi_pregrasp_refusal.model import RefusalHead, TargetAwareRefusalHead  # noqa: E402
 
 
 def _load_checkpoint(path: str | Path, device: torch.device) -> dict:
@@ -44,11 +44,23 @@ def main():
     std = np.maximum(np.asarray(checkpoint["feature_std"], dtype=np.float32), 1e-6)
     features_std = (features - mean) / std
 
-    model = RefusalHead(
-        input_dim=int(checkpoint["input_dim"]),
-        hidden_dims=tuple(int(value) for value in checkpoint["hidden_dims"]),
-        dropout=float(checkpoint["dropout"]),
-    ).to(device)
+    model_type = checkpoint.get("model_type", "refusal_head")
+    hidden_dims = tuple(int(v) for v in checkpoint["hidden_dims"])
+    dropout = float(checkpoint["dropout"])
+    if model_type == "target_aware":
+        aux_heads = tuple(checkpoint.get("aux_heads", []))
+        model: RefusalHead | TargetAwareRefusalHead = TargetAwareRefusalHead(
+            input_dim=int(checkpoint["input_dim"]),
+            hidden_dims=hidden_dims,
+            dropout=dropout,
+            aux_heads=aux_heads,
+        ).to(device)
+    else:
+        model = RefusalHead(
+            input_dim=int(checkpoint["input_dim"]),
+            hidden_dims=hidden_dims,
+            dropout=dropout,
+        ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 

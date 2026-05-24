@@ -60,13 +60,41 @@ LANGUAGE_TARGETS = ["default", "blue", "red", "green", "yellow"]
 
 LANGUAGE_FEATURE_COLUMNS = [f"language_target_{target}" for target in LANGUAGE_TARGETS]
 
+# ---------------------------------------------------------------------------
+# Learned visual embedding feature columns (Phase 3)
+# ---------------------------------------------------------------------------
+
+DINO_EMBED_DIM = 384   # facebook/dinov2-small CLS token
+CLIP_EMBED_DIM = 512   # openai/clip-vit-base-patch32 pooler output
+
+# Per-camera DINOv2 columns: dinov2_{cam}_dim{i}  (3 × 384 = 1 152 total)
+DINO_PER_CAM_FEATURE_COLUMNS = [
+    f"dinov2_{cam}_dim{i}"
+    for cam in SMOLVLA_CAMERA_KEYS
+    for i in range(DINO_EMBED_DIM)
+]
+
+# Global mean of DINOv2 over cameras: dinov2_global_dim{i}  (384 total)
+DINO_GLOBAL_FEATURE_COLUMNS = [f"dinov2_global_dim{i}" for i in range(DINO_EMBED_DIM)]
+
+# Per-camera CLIP columns: clip_{cam}_dim{i}  (3 × 512 = 1 536 total)
+CLIP_PER_CAM_FEATURE_COLUMNS = [
+    f"clip_{cam}_dim{i}"
+    for cam in SMOLVLA_CAMERA_KEYS
+    for i in range(CLIP_EMBED_DIM)
+]
+
+# Global mean of CLIP over cameras: clip_global_dim{i}  (512 total)
+CLIP_GLOBAL_FEATURE_COLUMNS = [f"clip_global_dim{i}" for i in range(CLIP_EMBED_DIM)]
+
 ALL_FEATURE_COLUMNS = [
     *PREGRASP_FEATURE_COLUMNS,
     *VISUAL_FEATURE_COLUMNS,
     *VLA_ACTION_FEATURE_COLUMNS,
 ]
 
-FEATURE_GROUPS = {
+FEATURE_GROUPS: dict[str, list[str]] = {
+    # ---- original groups --------------------------------------------------
     "robot_state": PREGRASP_FEATURE_COLUMNS,
     "visual": VISUAL_FEATURE_COLUMNS,
     "visual_proxy": VISUAL_PROXY_FEATURE_COLUMNS,
@@ -89,6 +117,49 @@ FEATURE_GROUPS = {
         *PREGRASP_FEATURE_COLUMNS,
         *VISUAL_PROXY_FEATURE_COLUMNS,
         *VLA_ACTION_FEATURE_COLUMNS,
+        *LANGUAGE_FEATURE_COLUMNS,
+    ],
+    # ---- Phase 3: DINOv2 groups -------------------------------------------
+    # Global-mean embedding (384-dim) – recommended starting point
+    "dino": DINO_GLOBAL_FEATURE_COLUMNS,
+    "dino_language": [*DINO_GLOBAL_FEATURE_COLUMNS, *LANGUAGE_FEATURE_COLUMNS],
+    "geometry_dino": [*PREGRASP_FEATURE_COLUMNS, *DINO_GLOBAL_FEATURE_COLUMNS],
+    "geometry_dino_language": [
+        *PREGRASP_FEATURE_COLUMNS,
+        *DINO_GLOBAL_FEATURE_COLUMNS,
+        *LANGUAGE_FEATURE_COLUMNS,
+    ],
+    # Per-camera embeddings (1 152-dim) – richer but needs more regularisation
+    "dino_per_cam": DINO_PER_CAM_FEATURE_COLUMNS,
+    "dino_per_cam_language": [*DINO_PER_CAM_FEATURE_COLUMNS, *LANGUAGE_FEATURE_COLUMNS],
+    "geometry_dino_per_cam": [*PREGRASP_FEATURE_COLUMNS, *DINO_PER_CAM_FEATURE_COLUMNS],
+    "geometry_dino_per_cam_language": [
+        *PREGRASP_FEATURE_COLUMNS,
+        *DINO_PER_CAM_FEATURE_COLUMNS,
+        *LANGUAGE_FEATURE_COLUMNS,
+    ],
+    # ---- Phase 3: CLIP groups ---------------------------------------------
+    "clip": CLIP_GLOBAL_FEATURE_COLUMNS,
+    "clip_language": [*CLIP_GLOBAL_FEATURE_COLUMNS, *LANGUAGE_FEATURE_COLUMNS],
+    "geometry_clip": [*PREGRASP_FEATURE_COLUMNS, *CLIP_GLOBAL_FEATURE_COLUMNS],
+    "geometry_clip_language": [
+        *PREGRASP_FEATURE_COLUMNS,
+        *CLIP_GLOBAL_FEATURE_COLUMNS,
+        *LANGUAGE_FEATURE_COLUMNS,
+    ],
+    "clip_per_cam": CLIP_PER_CAM_FEATURE_COLUMNS,
+    "clip_per_cam_language": [*CLIP_PER_CAM_FEATURE_COLUMNS, *LANGUAGE_FEATURE_COLUMNS],
+    # ---- Phase 3: combined visual summary + DINO/CLIP ---------------------
+    "visual_dino": [*VISUAL_FEATURE_COLUMNS, *DINO_GLOBAL_FEATURE_COLUMNS],
+    "visual_dino_language": [
+        *VISUAL_FEATURE_COLUMNS,
+        *DINO_GLOBAL_FEATURE_COLUMNS,
+        *LANGUAGE_FEATURE_COLUMNS,
+    ],
+    "visual_clip": [*VISUAL_FEATURE_COLUMNS, *CLIP_GLOBAL_FEATURE_COLUMNS],
+    "visual_clip_language": [
+        *VISUAL_FEATURE_COLUMNS,
+        *CLIP_GLOBAL_FEATURE_COLUMNS,
         *LANGUAGE_FEATURE_COLUMNS,
     ],
 }

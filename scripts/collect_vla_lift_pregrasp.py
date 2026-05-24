@@ -98,6 +98,23 @@ parser.add_argument(
 )
 parser.add_argument("--max_steps", type=int, default=20000, help="Stop collection after this many env steps.")
 parser.add_argument("--stall_steps", type=int, default=2500, help="Stop if no labeled events are written for this many steps.")
+parser.add_argument(
+    "--embedding_model",
+    choices=["none", "dinov2", "clip", "both"],
+    default="none",
+    help=(
+        "Extract frozen learned visual embeddings at each pre-grasp event. "
+        "'dinov2' adds 1152 dinov2_{cam}_dim{i} + 384 dinov2_global_dim{i} columns. "
+        "'clip' adds 1536 clip_{cam}_dim{i} + 512 clip_global_dim{i} columns. "
+        "'both' adds both sets. Requires --skip_vla=False or --disable_cameras=False."
+    ),
+)
+parser.add_argument(
+    "--embedding_device",
+    type=str,
+    default="cuda",
+    help="Device for the learned embedding model (defaults to cuda).",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -132,7 +149,7 @@ from hsi_pregrasp_refusal.state_machine import (  # noqa: E402
     tensor_item,
 )
 from hsi_pregrasp_refusal.trigger import detect_pregrasp  # noqa: E402
-from hsi_pregrasp_refusal.vision import visual_feature_row, zero_visual_feature_row  # noqa: E402
+from hsi_pregrasp_refusal.vision import LearnedEmbeddingExtractor, visual_feature_row, zero_visual_feature_row  # noqa: E402
 from hsi_pregrasp_refusal.vla import SmolVLAAdapter, build_smolvla_state, zero_vla_feature_row  # noqa: E402
 
 import isaaclab_tasks  # noqa: E402,F401
@@ -237,6 +254,21 @@ def main():
             image_size=(args_cli.camera_height, args_cli.camera_width),
         )
 
+    # Learned visual embedding extractors (Phase 3).  Instantiated lazily; the
+    # underlying HuggingFace models are downloaded on first call if not cached.
+    embedding_extractors: list[LearnedEmbeddingExtractor] = []
+    if args_cli.embedding_model != "none" and not args_cli.disable_cameras:
+        models_to_load = (
+            ["dinov2", "clip"]
+            if args_cli.embedding_model == "both"
+            else [args_cli.embedding_model]
+        )
+        for emb_name in models_to_load:
+            embedding_extractors.append(
+                LearnedEmbeddingExtractor(emb_name, device=args_cli.embedding_device)
+            )
+        print(f"[INFO] Embedding extractors registered: {[e.model_name for e in embedding_extractors]}")
+
     actions = torch.zeros(env.unwrapped.action_space.shape, device=env.unwrapped.device)
     actions[:, 3] = 1.0
     desired_orientation = torch.zeros((env.unwrapped.num_envs, 4), device=env.unwrapped.device)
@@ -261,6 +293,12 @@ def main():
         for _ in range(env.unwrapped.num_envs)
     ]
 
+    # Build embedding column names from whichever extractors are active.
+    embedding_fieldnames: list[str] = []
+    for extractor in embedding_extractors:
+        embedding_fieldnames.extend(extractor.per_cam_feature_columns)
+        embedding_fieldnames.extend(extractor.global_feature_columns)
+
     fieldnames = [
         "event_id",
         "env_id",
@@ -276,6 +314,7 @@ def main():
         "vla_inference_ms",
         *ALL_FEATURE_COLUMNS,
         *LANGUAGE_FEATURE_COLUMNS,
+        *embedding_fieldnames,
         "close_accepted",
         "close_was_refused",
         "grasp_success",
@@ -380,6 +419,14 @@ def main():
                         and tensor_item(feature_tensors["ee_object_lateral_error"], env_id)
                         <= args_cli.geometry_good_lateral_threshold
                     )
+                    # Extract learned embeddings for each active extractor.
+                    embedding_rows: dict[str, float] = {}
+                    for extractor in embedding_extractors:
+                        if images:
+                            embedding_rows.update(extractor.embedding_feature_row(images))
+                        else:
+                            embedding_rows.update(extractor.zero_embedding_row())
+
                     pending[env_id] = {
                         "event_id": next_event_id,
                         "env_id": env_id,
@@ -397,6 +444,7 @@ def main():
                         **visual_row,
                         **vla_row,
                         **language_feature_row(language_target),
+                        **embedding_rows,
                         "close_accepted": 1,
                         "close_was_refused": 0,
                         "_target_step": step + label_horizon_steps,
